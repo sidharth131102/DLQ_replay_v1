@@ -1,0 +1,36 @@
+{
+  "name": "DLQ Replay Dataflow Flex Template",
+  "description": "Launches the DLQ replay Beam pipeline as a Dataflow Flex Template batch job.",
+  "parameters": [
+    {
+      "name": "config-yaml",
+      "label": "Replay config YAML",
+      "helpText": "GCS path to the replay configuration YAML file, for example gs://bucket/config/dlq-replay.yaml.",
+      "isOptional": false
+    },
+    {
+      "name": "table-name",
+      "label": "DLQ table_name filter",
+      "helpText": "Optional table_name filter to replay only one logical target.",
+      "isOptional": true
+    },
+    {
+      "name": "limit",
+      "label": "Replay limit",
+      "helpText": "Optional max number of DLQ rows to process in this run.",
+      "isOptional": true,
+      "regexes": [
+        "^[0-9]+$"
+      ]
+    },
+    {
+      "name": "fix-only",
+      "label": "Fix only mode",
+      "helpText": "Set to true to write repaired rows only without merging into the target table.",
+      "isOptional": true,
+      "regexes": [
+        "^(true|false)$"
+      ]
+    }
+  ]
+}

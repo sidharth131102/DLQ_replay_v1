@@ -1,0 +1,4 @@
+google-cloud-bigquery==3.38.0
+google-cloud-pubsub==2.33.0
+apache-beam[gcp]==2.67.0
+PyYAML==6.0.2
