@@ -29,6 +29,7 @@ class AppConfig:
     cdc_pending_table: str
     enable_deserialization_repair: bool
     log_level: str
+    dlq_update_grace_minutes: int
 
     @staticmethod
     def from_env() -> "AppConfig":
@@ -67,6 +68,7 @@ class AppConfig:
         manual_intervention_table = os.getenv("MANUAL_INTERVENTION_TABLE", "").strip()
         cdc_pending_table = os.getenv("CDC_PENDING_TABLE", "").strip()
         log_level = os.getenv("LOG_LEVEL", "INFO").strip().upper()
+        dlq_update_grace_minutes = int(os.getenv("DLQ_UPDATE_GRACE_MINUTES", "90"))
 
         missing = [
             name
@@ -104,6 +106,7 @@ class AppConfig:
             cdc_pending_table=cdc_pending_table,
             enable_deserialization_repair=enable_deserialization_repair,
             log_level=log_level,
+            dlq_update_grace_minutes=dlq_update_grace_minutes,
         )
 
     def resolve_target_table(self, table_name: str) -> str:

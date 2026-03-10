@@ -1,0 +1,422 @@
+﻿{
+  "displayName": "DLQ Replay Dashboard",
+  "gridLayout": {
+    "columns": "2",
+    "widgets": [
+      {
+        "title": "Replay Counter Overview",
+        "xyChart": {
+          "dataSets": [
+            {
+              "timeSeriesQuery": {
+                "timeSeriesFilter": {
+                  "filter": "metric.type=\"dataflow.googleapis.com/job/user_counter\" resource.type=\"dataflow_job\" metric.labels.metric_name=\"fetched\"",
+                  "aggregation": {
+                    "alignmentPeriod": "180s",
+                    "perSeriesAligner": "ALIGN_MAX",
+                    "crossSeriesReducer": "REDUCE_SUM",
+                    "groupByFields": []
+                  }
+                }
+              },
+              "plotType": "LINE",
+              "legendTemplate": "Fetched"
+            },
+            {
+              "timeSeriesQuery": {
+                "timeSeriesFilter": {
+                  "filter": "metric.type=\"dataflow.googleapis.com/job/user_counter\" resource.type=\"dataflow_job\" metric.labels.metric_name=\"replayed\"",
+                  "aggregation": {
+                    "alignmentPeriod": "180s",
+                    "perSeriesAligner": "ALIGN_MAX",
+                    "crossSeriesReducer": "REDUCE_SUM",
+                    "groupByFields": []
+                  }
+                }
+              },
+              "plotType": "LINE",
+              "legendTemplate": "Replayed"
+            },
+            {
+              "timeSeriesQuery": {
+                "timeSeriesFilter": {
+                  "filter": "metric.type=\"dataflow.googleapis.com/job/user_counter\" resource.type=\"dataflow_job\" metric.labels.metric_name=\"fixed_and_replayed\"",
+                  "aggregation": {
+                    "alignmentPeriod": "180s",
+                    "perSeriesAligner": "ALIGN_MAX",
+                    "crossSeriesReducer": "REDUCE_SUM",
+                    "groupByFields": []
+                  }
+                }
+              },
+              "plotType": "LINE",
+              "legendTemplate": "Fixed And Replayed"
+            },
+            {
+              "timeSeriesQuery": {
+                "timeSeriesFilter": {
+                  "filter": "metric.type=\"dataflow.googleapis.com/job/user_counter\" resource.type=\"dataflow_job\" metric.labels.metric_name=\"fixed_only\"",
+                  "aggregation": {
+                    "alignmentPeriod": "180s",
+                    "perSeriesAligner": "ALIGN_MAX",
+                    "crossSeriesReducer": "REDUCE_SUM",
+                    "groupByFields": []
+                  }
+                }
+              },
+              "plotType": "LINE",
+              "legendTemplate": "Fix Only"
+            }
+          ],
+          "timeshiftDuration": "0s",
+          "yAxis": {
+            "label": "Messages / 3 min",
+            "scale": "LINEAR"
+          }
+        }
+      },
+      {
+        "title": "Replay Exception Overview",
+        "xyChart": {
+          "dataSets": [
+            {
+              "timeSeriesQuery": {
+                "timeSeriesFilter": {
+                  "filter": "metric.type=\"dataflow.googleapis.com/job/user_counter\" resource.type=\"dataflow_job\" metric.labels.metric_name=\"discarded\"",
+                  "aggregation": {
+                    "alignmentPeriod": "180s",
+                    "perSeriesAligner": "ALIGN_MAX",
+                    "crossSeriesReducer": "REDUCE_SUM",
+                    "groupByFields": []
+                  }
+                }
+              },
+              "plotType": "LINE",
+              "legendTemplate": "Discarded"
+            },
+            {
+              "timeSeriesQuery": {
+                "timeSeriesFilter": {
+                  "filter": "metric.type=\"dataflow.googleapis.com/job/user_counter\" resource.type=\"dataflow_job\" metric.labels.metric_name=\"manual_intervention_routed\"",
+                  "aggregation": {
+                    "alignmentPeriod": "180s",
+                    "perSeriesAligner": "ALIGN_MAX",
+                    "crossSeriesReducer": "REDUCE_SUM",
+                    "groupByFields": []
+                  }
+                }
+              },
+              "plotType": "LINE",
+              "legendTemplate": "Manual Intervention Routed"
+            },
+            {
+              "timeSeriesQuery": {
+                "timeSeriesFilter": {
+                  "filter": "metric.type=\"dataflow.googleapis.com/job/user_counter\" resource.type=\"dataflow_job\" metric.labels.metric_name=\"cdc_pending_routed\"",
+                  "aggregation": {
+                    "alignmentPeriod": "180s",
+                    "perSeriesAligner": "ALIGN_MAX",
+                    "crossSeriesReducer": "REDUCE_SUM",
+                    "groupByFields": []
+                  }
+                }
+              },
+              "plotType": "LINE",
+              "legendTemplate": "CDC Pending Routed"
+            },
+            {
+              "timeSeriesQuery": {
+                "timeSeriesFilter": {
+                  "filter": "metric.type=\"dataflow.googleapis.com/job/user_counter\" resource.type=\"dataflow_job\" metric.labels.metric_name=\"merge_failed\"",
+                  "aggregation": {
+                    "alignmentPeriod": "180s",
+                    "perSeriesAligner": "ALIGN_MAX",
+                    "crossSeriesReducer": "REDUCE_SUM",
+                    "groupByFields": []
+                  }
+                }
+              },
+              "plotType": "LINE",
+              "legendTemplate": "Merge Failed"
+            },
+            {
+              "timeSeriesQuery": {
+                "timeSeriesFilter": {
+                  "filter": "metric.type=\"dataflow.googleapis.com/job/user_counter\" resource.type=\"dataflow_job\" metric.labels.metric_name=\"failed\"",
+                  "aggregation": {
+                    "alignmentPeriod": "180s",
+                    "perSeriesAligner": "ALIGN_MAX",
+                    "crossSeriesReducer": "REDUCE_SUM",
+                    "groupByFields": []
+                  }
+                }
+              },
+              "plotType": "LINE",
+              "legendTemplate": "Failed"
+            }
+          ],
+          "timeshiftDuration": "0s",
+          "yAxis": {
+            "label": "Messages / 3 min",
+            "scale": "LINEAR"
+          }
+        }
+      },
+      {
+        "title": "Discarded",
+        "scorecard": {
+          "timeSeriesQuery": {
+            "timeSeriesFilter": {
+              "filter": "metric.type=\"dataflow.googleapis.com/job/user_counter\" resource.type=\"dataflow_job\" metric.labels.metric_name=\"discarded\"",
+              "aggregation": {
+                "alignmentPeriod": "180s",
+                "perSeriesAligner": "ALIGN_MAX",
+                "crossSeriesReducer": "REDUCE_SUM",
+                "groupByFields": []
+              }
+            }
+          },
+          "sparkChartView": {
+            "sparkChartType": "SPARK_LINE"
+          }
+        }
+      },
+      {
+        "title": "Manual Intervention Routed",
+        "scorecard": {
+          "timeSeriesQuery": {
+            "timeSeriesFilter": {
+              "filter": "metric.type=\"dataflow.googleapis.com/job/user_counter\" resource.type=\"dataflow_job\" metric.labels.metric_name=\"manual_intervention_routed\"",
+              "aggregation": {
+                "alignmentPeriod": "180s",
+                "perSeriesAligner": "ALIGN_MAX",
+                "crossSeriesReducer": "REDUCE_SUM",
+                "groupByFields": []
+              }
+            }
+          },
+          "sparkChartView": {
+            "sparkChartType": "SPARK_LINE"
+          }
+        }
+      },
+      {
+        "title": "CDC Pending Routed",
+        "scorecard": {
+          "timeSeriesQuery": {
+            "timeSeriesFilter": {
+              "filter": "metric.type=\"dataflow.googleapis.com/job/user_counter\" resource.type=\"dataflow_job\" metric.labels.metric_name=\"cdc_pending_routed\"",
+              "aggregation": {
+                "alignmentPeriod": "180s",
+                "perSeriesAligner": "ALIGN_MAX",
+                "crossSeriesReducer": "REDUCE_SUM",
+                "groupByFields": []
+              }
+            }
+          },
+          "sparkChartView": {
+            "sparkChartType": "SPARK_LINE"
+          }
+        }
+      },
+      {
+        "title": "Merge Failed",
+        "scorecard": {
+          "timeSeriesQuery": {
+            "timeSeriesFilter": {
+              "filter": "metric.type=\"dataflow.googleapis.com/job/user_counter\" resource.type=\"dataflow_job\" metric.labels.metric_name=\"merge_failed\"",
+              "aggregation": {
+                "alignmentPeriod": "180s",
+                "perSeriesAligner": "ALIGN_MAX",
+                "crossSeriesReducer": "REDUCE_SUM",
+                "groupByFields": []
+              }
+            }
+          },
+          "sparkChartView": {
+            "sparkChartType": "SPARK_LINE"
+          }
+        }
+      },
+      {
+        "title": "Processing Failed",
+        "scorecard": {
+          "timeSeriesQuery": {
+            "timeSeriesFilter": {
+              "filter": "metric.type=\"dataflow.googleapis.com/job/user_counter\" resource.type=\"dataflow_job\" metric.labels.metric_name=\"failed\"",
+              "aggregation": {
+                "alignmentPeriod": "180s",
+                "perSeriesAligner": "ALIGN_MAX",
+                "crossSeriesReducer": "REDUCE_SUM",
+                "groupByFields": []
+              }
+            }
+          },
+          "sparkChartView": {
+            "sparkChartType": "SPARK_LINE"
+          }
+        }
+      },
+      {
+        "title": "Replay Throughput Trends",
+        "xyChart": {
+          "dataSets": [
+            {
+              "timeSeriesQuery": {
+                "timeSeriesFilter": {
+                  "filter": "metric.type=\"dataflow.googleapis.com/job/user_counter\" resource.type=\"dataflow_job\" metric.labels.metric_name=\"fetched\"",
+                  "aggregation": {
+                    "alignmentPeriod": "180s",
+                "perSeriesAligner": "ALIGN_MAX",
+                    "crossSeriesReducer": "REDUCE_SUM",
+                    "groupByFields": []
+                  }
+                }
+              },
+              "plotType": "LINE",
+              "legendTemplate": "Fetched"
+            },
+            {
+              "timeSeriesQuery": {
+                "timeSeriesFilter": {
+                  "filter": "metric.type=\"dataflow.googleapis.com/job/user_counter\" resource.type=\"dataflow_job\" metric.labels.metric_name=\"replayed\"",
+                  "aggregation": {
+                    "alignmentPeriod": "180s",
+                "perSeriesAligner": "ALIGN_MAX",
+                    "crossSeriesReducer": "REDUCE_SUM",
+                    "groupByFields": []
+                  }
+                }
+              },
+              "plotType": "LINE",
+              "legendTemplate": "Replayed"
+            },
+            {
+              "timeSeriesQuery": {
+                "timeSeriesFilter": {
+                  "filter": "metric.type=\"dataflow.googleapis.com/job/user_counter\" resource.type=\"dataflow_job\" metric.labels.metric_name=\"fixed_and_replayed\"",
+                  "aggregation": {
+                    "alignmentPeriod": "180s",
+                    "perSeriesAligner": "ALIGN_MAX",
+                    "crossSeriesReducer": "REDUCE_SUM",
+                    "groupByFields": []
+                  }
+                }
+              },
+              "plotType": "LINE",
+              "legendTemplate": "Fixed And Replayed"
+            },
+            {
+              "timeSeriesQuery": {
+                "timeSeriesFilter": {
+                  "filter": "metric.type=\"dataflow.googleapis.com/job/user_counter\" resource.type=\"dataflow_job\" metric.labels.metric_name=\"fixed_only\"",
+                  "aggregation": {
+                    "alignmentPeriod": "180s",
+                    "perSeriesAligner": "ALIGN_MAX",
+                    "crossSeriesReducer": "REDUCE_SUM",
+                    "groupByFields": []
+                  }
+                }
+              },
+              "plotType": "LINE",
+              "legendTemplate": "Fix Only"
+            }
+          ],
+          "timeshiftDuration": "0s",
+          "yAxis": {
+            "label": "Messages / 5 min",
+            "scale": "LINEAR"
+          }
+        }
+      },
+      {
+        "title": "Replay Exception Trends",
+        "xyChart": {
+          "dataSets": [
+            {
+              "timeSeriesQuery": {
+                "timeSeriesFilter": {
+                  "filter": "metric.type=\"dataflow.googleapis.com/job/user_counter\" resource.type=\"dataflow_job\" metric.labels.metric_name=\"discarded\"",
+                  "aggregation": {
+                    "alignmentPeriod": "180s",
+                    "perSeriesAligner": "ALIGN_MAX",
+                    "crossSeriesReducer": "REDUCE_SUM",
+                    "groupByFields": []
+                  }
+                }
+              },
+              "plotType": "LINE",
+              "legendTemplate": "Discarded"
+            },
+            {
+              "timeSeriesQuery": {
+                "timeSeriesFilter": {
+                  "filter": "metric.type=\"dataflow.googleapis.com/job/user_counter\" resource.type=\"dataflow_job\" metric.labels.metric_name=\"manual_intervention_routed\"",
+                  "aggregation": {
+                    "alignmentPeriod": "180s",
+                    "perSeriesAligner": "ALIGN_MAX",
+                    "crossSeriesReducer": "REDUCE_SUM",
+                    "groupByFields": []
+                  }
+                }
+              },
+              "plotType": "LINE",
+              "legendTemplate": "Manual Intervention Routed"
+            },
+            {
+              "timeSeriesQuery": {
+                "timeSeriesFilter": {
+                  "filter": "metric.type=\"dataflow.googleapis.com/job/user_counter\" resource.type=\"dataflow_job\" metric.labels.metric_name=\"cdc_pending_routed\"",
+                  "aggregation": {
+                    "alignmentPeriod": "180s",
+                    "perSeriesAligner": "ALIGN_MAX",
+                    "crossSeriesReducer": "REDUCE_SUM",
+                    "groupByFields": []
+                  }
+                }
+              },
+              "plotType": "LINE",
+              "legendTemplate": "CDC Pending Routed"
+            },
+            {
+              "timeSeriesQuery": {
+                "timeSeriesFilter": {
+                  "filter": "metric.type=\"dataflow.googleapis.com/job/user_counter\" resource.type=\"dataflow_job\" metric.labels.metric_name=\"merge_failed\"",
+                  "aggregation": {
+                    "alignmentPeriod": "180s",
+                    "perSeriesAligner": "ALIGN_MAX",
+                    "crossSeriesReducer": "REDUCE_SUM",
+                    "groupByFields": []
+                  }
+                }
+              },
+              "plotType": "LINE",
+              "legendTemplate": "Merge Failed"
+            },
+            {
+              "timeSeriesQuery": {
+                "timeSeriesFilter": {
+                  "filter": "metric.type=\"dataflow.googleapis.com/job/user_counter\" resource.type=\"dataflow_job\" metric.labels.metric_name=\"failed\"",
+                  "aggregation": {
+                    "alignmentPeriod": "180s",
+                    "perSeriesAligner": "ALIGN_MAX",
+                    "crossSeriesReducer": "REDUCE_SUM",
+                    "groupByFields": []
+                  }
+                }
+              },
+              "plotType": "LINE",
+              "legendTemplate": "Failed"
+            }
+          ],
+          "timeshiftDuration": "0s",
+          "yAxis": {
+            "label": "Messages / 5 min",
+            "scale": "LINEAR"
+          }
+        }
+      }
+    ]
+  }
+}
+

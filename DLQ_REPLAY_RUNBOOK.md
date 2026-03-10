@@ -450,6 +450,7 @@ Primary evidence surfaces:
 - manual intervention table
 - CDC pending table
 - Cloud Monitoring metric `dataflow.googleapis.com/job/user_counter` filtered to `manual_intervention_routed`
+- Cloud Monitoring dashboard for replay counters
 - Dataflow job logs
 - Cloud Run launcher logs
 - Scheduler execution history
@@ -736,7 +737,14 @@ CDC_PENDING_TABLE: "stream-accelerator-3.dataengineering.cdc_pending_replay"
   -ConfigYaml ".env.job.yaml"
 ```
 
-### Step 7. Trigger Replay Manually (Immediate Run)
+### Step 7. Deploy the Replay Dashboard
+```powershell
+.\scripts\deploy_replay_dashboard.ps1 `
+  -ProjectId "stream-accelerator-3" `
+  -Region "us-central1"
+```
+
+### Step 8. Trigger Replay Manually (Immediate Run)
 Option 1: submit ad hoc Dataflow directly
 ```powershell
 .\scripts\run_dataflow_replay.ps1 `
@@ -757,7 +765,7 @@ gcloud scheduler jobs run run-dlq-replay-nightly `
   --project stream-accelerator-3
 ```
 
-### Step 8. Check DLQ Replay Status
+### Step 9. Check DLQ Replay Status
 ```sql
 SELECT
   COUNT(*) AS total_unreprocessed,
@@ -768,7 +776,7 @@ FROM `stream-accelerator-3.dataengineering.streaming_data_dlq`
 WHERE reprocessed = FALSE;
 ```
 
-### Step 9. Check CDC Pending Queue
+### Step 10. Check CDC Pending Queue
 ```sql
 SELECT
   status,
@@ -779,7 +787,7 @@ GROUP BY status, error_type
 ORDER BY cnt DESC;
 ```
 
-### Step 10. Verify Recent Fixes
+### Step 11. Verify Recent Fixes
 ```sql
 SELECT
   error_type,
@@ -791,7 +799,7 @@ ORDER BY processed_at DESC
 LIMIT 50;
 ```
 
-### Step 11. Verify Manual Intervention Volume
+### Step 12. Verify Manual Intervention Volume
 ```sql
 SELECT
   reason,
@@ -802,7 +810,7 @@ ORDER BY cnt DESC
 LIMIT 50;
 ```
 
-### Step 12. Validate Main Table After Replay
+### Step 13. Validate Main Table After Replay
 ```sql
 SELECT
   event_id,
@@ -813,7 +821,7 @@ HAVING cnt > 1
 LIMIT 20;
 ```
 
-### Step 13. Recovery if Replay Fails Mid-Run
+### Step 14. Recovery if Replay Fails Mid-Run
 Use the latest Dataflow job logs first.  
 Do not reset or delete DLQ rows blindly.  
 Correct the underlying issue, rebuild the Flex Template if code changed, and rerun replay with a limited scope first.

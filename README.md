@@ -30,6 +30,8 @@ Operational runbook:
 - `scripts/deploy_replay_launcher.ps1`: deploy the Cloud Run launcher
 - `scripts/create_replay_scheduler.ps1`: create the Cloud Scheduler job for the launcher
 - `scripts/deploy_manual_intervention_alert.ps1`: create a Cloud Monitoring alert on the Dataflow manual-intervention counter
+- `scripts/deploy_replay_job_failure_alert.ps1`: create a Cloud Monitoring alert when a Dataflow replay job fails
+- `scripts/deploy_replay_dashboard.ps1`: create or update the Cloud Monitoring dashboard for replay counters
 - `scripts/deploy_job.ps1`: legacy Cloud Run Job deployment
 - `scripts/run_dataflow_replay.ps1`: launch Dataflow replay
 - `scripts/create_scheduler_job.ps1`: legacy Cloud Run Job scheduler
@@ -74,6 +76,8 @@ Important optional:
 - `MANUAL_INTERVENTION_ALERT_ENABLED` (optional; enable Cloud Monitoring alert deployment)
 - `MANUAL_INTERVENTION_ALERT_THRESHOLD` (optional; threshold for `manual_intervention_routed`)
 - `MANUAL_INTERVENTION_ALERT_NOTIFICATION_CHANNEL` (optional; Monitoring notification channel ID/resource name)
+- `REPLAY_JOB_FAILURE_ALERT_ENABLED` (optional; enable Cloud Monitoring alert on Dataflow job failure)
+- `REPLAY_JOB_FAILURE_ALERT_NOTIFICATION_CHANNEL` (optional; Monitoring notification channel ID/resource name)
 
 ## Recommended GCP Deployment
 
@@ -175,6 +179,43 @@ This policy watches the Dataflow user counter:
 - `metric_name = manual_intervention_routed`
 
 and sends notifications through the configured Cloud Monitoring notification channel when the threshold is exceeded.
+
+### 6. Deploy the Replay Dashboard
+
+To visualize replay Dataflow counters in Cloud Monitoring, deploy the dashboard:
+
+```powershell
+./scripts/deploy_replay_dashboard.ps1 `
+  -ProjectId "your-project" `
+  -Region "us-central1"
+```
+
+The dashboard includes Dataflow user-counter widgets for:
+- `fetched`
+- `replayed`
+- `fixed_and_replayed`
+- `fixed_only`
+- `discarded`
+- `manual_intervention_routed`
+- `cdc_pending_routed`
+- `merge_failed`
+- `failed`
+
+### 7. Create the Replay Job Failure Alert
+
+If you want Cloud Monitoring to send an email through an existing notification channel when a replay Dataflow job fails, deploy the alert policy:
+
+```powershell
+./scripts/deploy_replay_job_failure_alert.ps1 `
+  -ProjectId "your-project" `
+  -Region "us-central1" `
+  -ConfigYaml ".env.job.yaml"
+```
+
+This policy watches the standard Dataflow metric:
+- `dataflow.googleapis.com/job/is_failed`
+
+and sends notifications through the configured Cloud Monitoring notification channel when a replay job enters the failed state.
 
 ## Legacy Cloud Run Job Deployment
 

@@ -402,6 +402,7 @@ class BigQueryRepository:
         params: list[bigquery.ArrayQueryParameter | bigquery.ScalarQueryParameter] = [
             bigquery.ArrayQueryParameter("discard_types", "STRING", list(self.config.discard_error_types)),
             bigquery.ScalarQueryParameter("limit", "INT64", limit),
+            bigquery.ScalarQueryParameter("dlq_update_grace_minutes", "INT64", self.config.dlq_update_grace_minutes),
         ]
         if table_name:
             table_filter = "AND table_name = @table_name"
@@ -412,6 +413,7 @@ class BigQueryRepository:
         FROM `{self.config.dlq_table}`
         WHERE reprocessed = FALSE
           AND error_type NOT IN UNNEST(@discard_types)
+          AND failed_timestamp < TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL @dlq_update_grace_minutes MINUTE)
           {table_filter}
         ORDER BY failed_timestamp
         LIMIT @limit

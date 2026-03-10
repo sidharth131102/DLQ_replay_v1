@@ -48,6 +48,7 @@ class ReplayRowDoFn(beam.DoFn):
         self._discarded = Metrics.counter("dlq_replay", "discarded")
         self._cdc_pending_routed = Metrics.counter("dlq_replay", "cdc_pending_routed")
         self._manual_intervention_routed = Metrics.counter("dlq_replay", "manual_intervention_routed")
+        self._merge_failed = Metrics.counter("dlq_replay", "merge_failed")
         self._failed = Metrics.counter("dlq_replay", "failed")
 
     def setup(self) -> None:
@@ -136,7 +137,7 @@ class ReplayRowDoFn(beam.DoFn):
             "error_type": row.get("error_type"),
             "failed_timestamp": str(row.get("failed_timestamp")),
         }
-        
+        decision = "DISCARD"
         discard_reason = None
         fix_notes: list[str] = []
         target_table = None
@@ -154,22 +155,7 @@ class ReplayRowDoFn(beam.DoFn):
                 return
             if retry_count >= config.max_retry_count:
                 reason = f"manual_intervention_poison_pill_max_retry_exceeded:{retry_count}"
-                self._repo.write_manual_intervention_result(
-                    row=row,
-                    fixed_message=parsed_for_manual,
-                    reason=reason,
-                    target_table=row.get("table_name"),
-                )
-                self._manual_intervention_routed.inc()
-                outcome = ReplayOutcome(
-                    decision="DISCARD",
-                    fix_applied="manual_intervention_poison_pill_max_retry_route",
-                    discard_reason=reason,
-                    target_table=None,
-                )
-                self._repo.mark_terminal(row, outcome.decision, outcome.fix_applied, outcome.discard_reason, dry_run=config.dry_run)
-                self._discarded.inc()
-                logging.warning("Discarded DLQ row by retry guard: %s", {**row_for_log, "discard_reason": outcome.discard_reason})
+                self._route_to_manual_intervention(row, reason)
                 return
             if (
                 retry_count >= config.reprocessing_loop_retry_threshold
@@ -512,6 +498,7 @@ class ReplayRowDoFn(beam.DoFn):
                     self._replayed.inc()
                     return
                 except Exception as merge_exc:
+                    self._merge_failed.inc()
                     merge_err = str(merge_exc)
                     if _is_payload_merge_error(merge_err):
                         effective_error_message = merge_err
@@ -672,6 +659,7 @@ class ReplayRowDoFn(beam.DoFn):
                         dry_run=config.dry_run,
                     )
                 except Exception as merge_exc:
+                    self._merge_failed.inc()
                     merge_err = str(merge_exc)
                     if _is_payload_merge_error(merge_err):
                         outcome = ReplayOutcome(
@@ -771,6 +759,7 @@ def _make_app_config_dict(args: argparse.Namespace) -> dict[str, Any]:
         "batch_size": args.batch_size,
         "max_records": args.max_records,
         "max_retry_count": args.max_retry_count,
+        "dlq_update_grace_minutes": args.dlq_update_grace_minutes,
         "reprocessing_loop_retry_threshold": args.reprocessing_loop_retry_threshold,
         "retry_input_topic": args.retry_input_topic or "",
         "dlq_retry_count_attribute": args.dlq_retry_count_attribute or "dlq_retry_count",
@@ -824,6 +813,7 @@ def _build_dlq_query(config: dict[str, Any], table_name: str | None, limit: int 
 SELECT {', '.join(columns)}
 FROM `{config["dlq_table"]}`
 WHERE reprocessed = FALSE
+  AND failed_timestamp < TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL {int(config["dlq_update_grace_minutes"])} MINUTE)
   {discard_filter}
   {table_filter}
 ORDER BY failed_timestamp
@@ -845,6 +835,7 @@ def parse_args() -> tuple[argparse.Namespace, list[str]]:
     parser.add_argument("--batch-size", type=int, default=500)
     parser.add_argument("--max-records", type=int, default=5000)
     parser.add_argument("--max-retry-count", type=int, default=5)
+    parser.add_argument("--dlq-update-grace-minutes", type=int, default=90)
     parser.add_argument("--reprocessing-loop-retry-threshold", type=int, default=3)
     parser.add_argument("--retry-input-topic", default="")
     parser.add_argument("--dlq-retry-count-attribute", default="dlq_retry_count")
