@@ -1,7 +1,7 @@
-# DLQ Replay Runbook
+# DLQ Replay Runbook Documentation
+March 2026
 
-## Contents
-
+## Table of Contents
 1. DLQ Replay Overview  
 1.1 Introduction  
 1.2 Scope in This Repository  
@@ -11,129 +11,141 @@
 2. Replay Configuration  
 2.1 Required Configuration Controls  
 2.2 Configuration Intent  
-2.3 Operational Implications of Changing Core Controls  
+2.3 Operational Implications of Configuration Changes  
 2.4 Change-Control Checklist  
 
 3. Replay Data Flow and Routing  
 3.1 Architecture Overview  
 3.2 End-to-End Replay Flow  
 3.3 Routing Behaviour by Error Family  
-3.4 Expected Behaviour Across Environments  
+3.4 Environment Differences  
 
 4. Storage Contracts  
-4.1 Purpose of the DLQ Table  
-4.2 Fix-Only Output Table Contract  
-4.3 Manual Intervention Table Contract  
-4.4 CDC Pending Replay Table Contract  
-4.5 Auditability Expectations  
+4.1 DLQ Table  
+4.2 Fix-Only Output Table  
+4.3 Manual Intervention Table  
+4.4 CDC Pending Table  
+4.5 Auditability Requirements  
 
 5. Replay Infrastructure  
-5.1 Why the Scheduled Replay Stack Exists  
+5.1 Purpose of the Scheduled Replay Stack  
 5.2 Runtime Components  
-5.3 Infra Preparation Intent  
-5.4 Readiness Criteria Before Replay Runs  
-5.5 Ordering and Idempotency Principles  
+5.3 Infrastructure Preparation  
+5.4 Replay Readiness Criteria  
+5.5 Ordering and Idempotency  
 
 6. Replay Lifecycle  
-6.1 Core State Model  
+6.1 State Model  
 6.2 Lifecycle Semantics  
 6.3 Batch Processing Model  
-6.4 Idempotency Expectations  
-6.5 Completion Criteria for an Operational Run  
+6.4 Idempotency  
+6.5 Completion Criteria  
 6.6 Partial Replay Handling  
 
-7. Operational Queries and Evidence Views  
-7.1 Primary Operational Surfaces  
-7.2 Interpretation Guidance  
-7.3 Evidence Capture Expectations  
+7. Monitoring, Metrics, and Operational Evidence  
+7.1 Evidence Sources  
+7.2 Dataflow Custom Metrics  
+7.3 Dashboard Interpretation Guidance  
+7.4 Evidence Collection for Incidents  
 
 8. Operations Procedures  
-8.1 Daily Health Procedure  
-8.2 Incident-Time Operating Procedure  
+8.1 Daily Health Check  
+8.2 Incident Response Procedure  
 8.3 Replay Trigger Procedure  
-8.4 Post-Replay Verification Procedure  
-8.5 Pre-Release / Post-Release Procedure  
-8.6 Historical Replay / Backfill Procedure  
-8.7 Operational Anti-Patterns to Avoid  
+8.4 Post-Replay Verification  
+8.5 Release Procedures  
+8.6 Historical Backfill Procedure  
+8.7 Operational Anti-Patterns  
 
 9. Troubleshooting  
-9.1 Problem: DLQ Backlog Grows Continuously  
-9.2 Problem: Rows Stay `reprocessed = false`  
-9.3 Problem: CDC Pending Backlog Grows  
-9.4 Problem: Manual Intervention Volume Spikes  
-9.5 Problem: Scheduler / Launcher / Flex Template Fails  
-9.6 Problem: Replay Completes But Target Data Looks Wrong  
+9.1 DLQ Backlog Growth  
+9.2 Records Remain Unprocessed  
+9.3 CDC Pending Backlog Growth  
+9.4 Manual Intervention Volume Spike  
+9.5 Scheduler / Launcher Failure  
+9.6 Incorrect Target Data After Replay  
+9.7 DLQ Update Reliability Problems  
 
 10. DLQ Replay Execution Procedure  
-
 
 ## 1. DLQ Replay Overview
 
 ### 1.1 Introduction
-This repository implements deterministic replay of failed pipeline records from a BigQuery DLQ table back into target BigQuery tables or back into the original Pub/Sub input topic, depending on the failure type.
+This repository implements deterministic replay of failed pipeline records from a BigQuery Dead Letter Queue (DLQ) table back into target systems.
 
-The replay path exists to prevent permanent data loss while avoiding unsafe blind retries. It standardises how to:
-- classify DLQ failures
-- repair payloads when deterministic repair is possible
-- route non-repairable records to manual intervention
-- route CDC-specific sequencing/idempotency cases to a pending table
-- requeue operational failures back to the main input topic
-- execute replay on a schedule using Dataflow
+Replay is used to prevent permanent data loss while ensuring retries occur in a controlled and observable manner.
+
+The replay framework standardizes how to:
+- Classify DLQ failures
+- Repair payloads when deterministic repair is possible
+- Route non-repairable records to manual intervention
+- Route CDC-specific sequencing and idempotency cases to a pending table
+- Requeue operational failures back to the original Pub/Sub input topic
+- Execute replay on a schedule using Dataflow
 
 ### 1.2 Scope in This Repository
-This repository currently implements:
-- deterministic fix logic for transport, deserialization, schema, coercion, and storage-related payload issues
-- merge-based replay into target BigQuery tables
-- manual intervention routing for non-repairable cases
-- CDC pending routing for CDC-specific sequencing, idempotency, and contract-validation cases
-- requeue of operational/auth/routing failures to the original Pub/Sub input topic
-- scheduled deployment model using:
-  - Cloud Scheduler
-  - Cloud Run launcher
-  - Dataflow Flex Template
+The repository currently implements the following replay capabilities:
+- Deterministic repair logic for:
+  - transport errors
+  - deserialization issues
+  - schema mismatches
+  - type coercion failures
+  - storage-related payload errors
+- Merge-based replay into target BigQuery tables
+- Manual intervention routing for non-repairable cases
+- CDC pending routing for sequencing and idempotency-related issues
+- Requeue of operational, authentication, or routing failures back to the original Pub/Sub topic
+
+Replay execution uses a scheduled infrastructure consisting of:
+- Cloud Scheduler
+- Cloud Run launcher
+- Dataflow Flex Template
 
 ### 1.3 Environment Behaviour Model
-Replay behaviour is configuration-driven, not environment-hardcoded.
+Replay behaviour is configuration-driven, not environment hardcoded.
 
-Operationally, the same DLQ record can behave differently across environments because of:
-- different DLQ tables
-- different target tables
-- different Pub/Sub retry topics
-- different `MAX_RETRY_COUNT`
-- different manual intervention tables
-- different replay schedule cadence
-- different target schemas
+A DLQ record may behave differently across environments because of differences in:
+- DLQ table location
+- Target tables
+- Pub/Sub retry topics
+- Maximum retry limits
+- Manual intervention tables
+- Replay schedule frequency
+- Target schema definitions
+- DLQ update grace windows
 
-Incident Review Note  
-Always record:
-- environment
-- DLQ table
-- target table
-- replay config version
-- `MAX_RETRY_COUNT`
-- whether replay was manual or scheduled
+**Incident Review Requirement**  
+When reviewing incidents, always record:
+- Environment name
+- DLQ table used
+- Target table used
+- Replay configuration version
+- `MAX_RETRY_COUNT` value
+- `DLQ_UPDATE_GRACE_MINUTES` value
+- Whether replay was manual or scheduled
 
 Environment confusion is a common source of incorrect incident conclusions.
 
 ### 1.4 Core Terms
 
-| Term | Purpose / Notes |
+| Term | Description |
 |---|---|
-| DLQ table | BigQuery table storing failed records from the main pipeline |
-| Replay | Controlled reprocessing of DLQ rows |
-| Fix-only output | Table storing repaired payloads and repair notes before merge |
-| Manual intervention table | Holding table for non-repairable records requiring engineer review |
-| CDC pending table | Holding table for CDC-specific replay cases that require state-aware handling |
-| Requeue | Republishing the original message to the main Pub/Sub input topic |
-| Merge | BigQuery upsert/merge into the target table |
-| Retry count | DLQ replay attempt count used for poison-pill protection |
-| Poison pill | Record that repeatedly fails and must not loop indefinitely |
-
+| DLQ table | BigQuery table storing failed pipeline records |
+| Replay | Controlled reprocessing of DLQ records |
+| Fix-only output | Table storing repaired payloads before merge |
+| Manual intervention table | Holding table for records requiring engineer review |
+| CDC pending table | Holding table for CDC-specific replay cases |
+| Requeue | Republishing original message to Pub/Sub input topic |
+| Merge | BigQuery upsert operation into the target table |
+| Retry count | Number of replay attempts for a DLQ record |
+| Poison pill | Record that repeatedly fails and must not be retried indefinitely |
+| DLQ update grace window | Time buffer before replay can mutate recently-streamed DLQ rows |
+| Discarded routed to manual | Terminal discard outcome where the record is persisted to the manual table |
 
 ## 2. Replay Configuration
 
 ### 2.1 Required Configuration Controls
-Before operating replay, validate:
+Before running replay, validate the following configuration values:
 - `PROJECT_ID`
 - `LOCATION`
 - `DLQ_TABLE`
@@ -142,6 +154,7 @@ Before operating replay, validate:
 - `BATCH_SIZE`
 - `MAX_RECORDS`
 - `MAX_RETRY_COUNT`
+- `DLQ_UPDATE_GRACE_MINUTES`
 - `RETRY_INPUT_TOPIC`
 - `FIX_ONLY_OUTPUT_TABLE`
 - `MANUAL_INTERVENTION_TABLE`
@@ -150,162 +163,203 @@ Before operating replay, validate:
 - `DISCARD_ERROR_TYPES`
 - `REQUIRED_FIELDS`
 - `REGEX_RULES_JSON`
-- `DLQ_ID_COLUMN` if available
-- `MANUAL_INTERVENTION_ALERT_ENABLED` if Cloud Monitoring alerting is desired
+- `DLQ_ID_COLUMN`
+- `MANUAL_INTERVENTION_ALERT_ENABLED`
 - `MANUAL_INTERVENTION_ALERT_THRESHOLD`
 - `MANUAL_INTERVENTION_ALERT_NOTIFICATION_CHANNEL`
+- `REPLAY_JOB_FAILURE_ALERT_ENABLED`
+- `REPLAY_JOB_FAILURE_ALERT_NOTIFICATION_CHANNEL`
 
 ### 2.2 Configuration Intent
 
-| Setting | Purpose / Notes |
+| Setting | Purpose |
 |---|---|
-| `DLQ_TABLE` | Source of unreprocessed failed records |
-| `DEFAULT_TARGET_TABLE` | Default merge destination when row-level table resolution is absent |
-| `MERGE_KEY` | Primary merge key used for replay merge semantics |
+| `DLQ_TABLE` | Source table containing failed records |
+| `DEFAULT_TARGET_TABLE` | Default merge destination |
+| `MERGE_KEY` | Primary key used for merge operations |
 | `BATCH_SIZE` | Number of records fetched per replay batch |
-| `MAX_RECORDS` | Upper cap for a single replay run |
-| `MAX_RETRY_COUNT` | Poison-pill protection threshold |
-| `RETRY_INPUT_TOPIC` | Destination for operational/auth/routing retries |
-| `FIX_ONLY_OUTPUT_TABLE` | Stores fixed payloads and repair notes |
-| `MANUAL_INTERVENTION_TABLE` | Stores rows that must not be auto-merged |
-| `CDC_PENDING_TABLE` | Stores CDC cases that need separate state-aware replay |
-| `ENABLE_DESERIALIZATION_REPAIR` | Enables safe JSON normalization heuristics |
-| `REQUIRED_FIELDS` | Fields that must remain present after repair |
-| `REGEX_RULES_JSON` | Regex validation for key fields like `event_id` |
-| `MANUAL_INTERVENTION_ALERT_THRESHOLD` | Threshold for Dataflow manual-intervention routing alert |
-| `MANUAL_INTERVENTION_ALERT_NOTIFICATION_CHANNEL` | Existing Cloud Monitoring notification channel used for email delivery |
+| `MAX_RECORDS` | Maximum number of records per replay run |
+| `MAX_RETRY_COUNT` | Threshold for poison-pill protection |
+| `DLQ_UPDATE_GRACE_MINUTES` | Prevents replay from updating very fresh DLQ rows still in streaming buffer |
+| `RETRY_INPUT_TOPIC` | Pub/Sub topic used for requeueing |
+| `FIX_ONLY_OUTPUT_TABLE` | Stores repaired payloads and repair notes |
+| `MANUAL_INTERVENTION_TABLE` | Stores records requiring manual investigation |
+| `CDC_PENDING_TABLE` | Stores CDC cases needing separate replay |
+| `ENABLE_DESERIALIZATION_REPAIR` | Enables JSON normalization heuristics |
+| `REQUIRED_FIELDS` | Fields required after payload repair |
+| `REGEX_RULES_JSON` | Regex validation rules |
+| `DLQ_ID_COLUMN` | Stable unique DLQ row identifier used for reliable terminal updates |
+| `MANUAL_INTERVENTION_ALERT_THRESHOLD` | Alert threshold for discarded-to-manual routing |
+| `MANUAL_INTERVENTION_ALERT_NOTIFICATION_CHANNEL` | Monitoring notification channel |
+| `REPLAY_JOB_FAILURE_ALERT_NOTIFICATION_CHANNEL` | Notification channel for replay job failure alerts |
 
-### 2.3 Operational Implications of Changing Core Controls
+### 2.3 Operational Implications of Configuration Changes
 
-**Raising `MAX_RETRY_COUNT`**
-- more opportunities for transient recovery
-- higher risk of prolonged replay churn
-- larger time to identify true poison-pill records
+**Increasing `MAX_RETRY_COUNT`**  
+Pros:
+- Higher chance of recovering transient failures
 
-**Lowering `MAX_RETRY_COUNT`**
-- faster quarantine/manual routing
-- less retry churn
-- higher operator involvement
+Risks:
+- Longer retry cycles
+- Delay in identifying poison-pill records
 
-**Raising `BATCH_SIZE` / `MAX_RECORDS`**
-- faster backlog burn-down
-- higher Dataflow resource usage
-- higher blast radius if a merge-path issue is introduced
+**Decreasing `MAX_RETRY_COUNT`**  
+Pros:
+- Faster quarantine of problematic records
 
-**Lowering `BATCH_SIZE` / `MAX_RECORDS`**
-- safer operational control
-- slower backlog reduction
-- useful during incident isolation
+Risks:
+- Increased manual investigation
+
+**Increasing `BATCH_SIZE` or `MAX_RECORDS`**  
+Pros:
+- Faster DLQ backlog reduction
+
+Risks:
+- Increased Dataflow resource usage
+- Larger operational blast radius
+
+**Decreasing `BATCH_SIZE` or `MAX_RECORDS`**  
+Pros:
+- Safer during incident debugging
+
+Risks:
+- Slower backlog reduction
+
+**Decreasing `DLQ_UPDATE_GRACE_MINUTES`**  
+Pros:
+- Faster replay of recent DLQ rows
+- Better for non-prod rapid testing
+
+Risks:
+- Higher chance of BigQuery streaming-buffer DML errors
+
+**Increasing `DLQ_UPDATE_GRACE_MINUTES`**  
+Pros:
+- Safer DLQ updates
+- Fewer replay failures against streamed rows
+
+Risks:
+- Slower replay of fresh DLQ backlog
 
 ### 2.4 Change-Control Checklist
-Before changing replay config:
-- confirm the target environment
-- confirm target schema compatibility
-- confirm retry topic exists and is correct
-- confirm manual intervention table exists
-- confirm CDC pending table exists
-- document old and new values
-- avoid changing multiple core controls in one release
-
+Before modifying replay configuration:
+- Confirm target environment
+- Confirm schema compatibility
+- Confirm retry topic exists
+- Confirm manual intervention table exists
+- Confirm CDC pending table exists
+- Confirm alert notification channels exist
+- Document configuration changes
+- Avoid modifying multiple critical parameters simultaneously
 
 ## 3. Replay Data Flow and Routing
 
 ### 3.1 Architecture Overview
-The scheduled replay architecture is:
+Scheduled replay follows this architecture:
+1. Cloud Scheduler triggers the replay launcher.
+2. Cloud Run launcher receives the authenticated request.
+3. Launcher calls the Dataflow Flex Template API.
+4. Dataflow starts the replay pipeline.
+5. Replay reads unreprocessed records from BigQuery.
+6. Records are routed according to failure type.
 
-1. Cloud Scheduler triggers the launcher on a schedule.
-2. Cloud Run launcher receives authenticated HTTP request.
-3. Launcher calls the Dataflow Flex Template launch API.
-4. Dataflow starts the replay batch job.
-5. Replay reads unreprocessed DLQ rows from BigQuery.
-6. Replay decides one of:
-   - merge to target table
-   - route to manual intervention
-   - route to CDC pending
-   - republish to input topic
-   - mark retry-pending for later rerun
+Possible actions:
+- Merge into target table
+- Route to manual intervention table
+- Republish to Pub/Sub input topic
+- Mark for retry
+- Route to CDC pending
 
 ### 3.2 End-to-End Replay Flow
-Each DLQ row follows this path:
-1. Row is fetched from `DLQ_TABLE` where `reprocessed = false`.
-2. Replay checks poison-pill guards.
-3. Replay checks special-routing categories:
-   - CDC pending types
-   - manual-only business-rule types
-   - observability/manual-only types
-   - DLQ publish failed
-   - partition decorator failures
-   - requeue-only operational/auth/routing types
-4. If payload processing is required:
-   - parse original message
-   - attempt deterministic repairs
-   - validate against target schema
-   - write fix-only result
-   - merge repaired payload
-5. Replay updates DLQ row state:
-   - terminal reprocessed
-   - retry-pending
-   - manual-routed
-   - CDC-pending-routed
+Each DLQ row follows the process below:
+1. Fetch record from `DLQ_TABLE` where `reprocessed = false`
+2. Skip rows inside the configured DLQ update grace window
+3. Evaluate poison-pill protection rules
+4. Evaluate routing category:
+   - CDC-specific errors
+   - Manual-only business-rule errors
+   - Observability failures
+   - Operational requeue cases
+5. If repairable:
+   - Parse original message
+   - Apply deterministic fixes
+   - Validate schema
+   - Write fix-only result
+   - Merge repaired payload
+6. Update DLQ record state
+
+Possible outcomes:
+- Reprocessed (terminal)
+- Retry pending
+- Manual intervention
+- CDC pending
 
 ### 3.3 Routing Behaviour by Error Family
 
-| Error family | Current handling |
+| Error Category | Handling |
 |---|---|
-| Transport / Message-Level | deterministic repair if possible, else manual intervention |
-| Deserialization | heuristic repair if possible, else terminal/manual depending on case |
-| Schema / Coercion / Storage | deterministic repair, validate, merge or manual |
-| Infrastructure / Auth / Routing operational failures | republish to `RETRY_INPUT_TOPIC` |
-| CDC idempotency / sequencing / contract validation | route to `CDC_PENDING_TABLE` |
-| Domain / business-rule validation | manual intervention |
-| Poison pill / reprocessing loop | manual intervention / terminal block |
-| DLQ observability failures | manual intervention |
+| Transport / Message-level errors | Attempt repair, otherwise manual |
+| Deserialization errors | Attempt heuristic repair |
+| Schema or coercion errors | Deterministic repair and merge |
+| Infrastructure failures | Republish to retry topic |
+| CDC ordering/idempotency | Route to CDC pending table |
+| Business rule violations | Route to manual intervention |
+| Poison-pill records | Manual routing |
+| Observability failures | Manual routing |
+| Terminal discard outcomes | Routed to manual intervention table in current Dataflow replay path |
 
-### 3.4 Expected Behaviour Across Environments
-The same DLQ message may replay differently across environments because:
-- target schema may differ
-- manual intervention table may differ
-- retry topic may differ
-- CDC pending table may differ
-- replay schedule timing may differ
+### 3.4 Environment Differences
+Replay results may vary across environments due to:
+- Schema differences
+- Different retry topics
+- Different manual tables
+- Different CDC tables
+- Different replay schedule timing
+- Different DLQ update grace windows
 
-This is expected and must be documented during incident review.
-
+These differences are expected and must be documented during incident analysis.
 
 ## 4. Storage Contracts
 
-### 4.1 Purpose of the DLQ Table
-The DLQ table is the durable source of replay work. It is not a table to be manually cleaned as a first response.
+### 4.1 DLQ Table
+The DLQ table is the durable source of replay work.
 
-Critical Distinction  
-Do not delete rows from the DLQ table as remediation.  
-A DLQ row is an operational record of failed business data and replay state.
+**Important Rule**  
+DLQ records must never be deleted as a remediation step.  
+Each DLQ row represents a record of failed business data and operational state.
 
-### 4.2 Fix-Only Output Table Contract
-The fix-only output table exists to make repair behaviour observable before merge.
+**Reliability Note**  
+For reliable terminal updates, the DLQ table should contain a stable unique identifier column such as `dlq_id`.  
+If `DLQ_ID_COLUMN` is not present, replay falls back to a composite match, which is less reliable.
 
-Expected purpose:
-- store original message
-- store fixed message
-- store repair notes
-- support fix verification during testing and incidents
+### 4.2 Fix-Only Output Table
+Purpose:
+- Store original message
+- Store repaired message
+- Record repair notes
 
-Operationally, it is the first place to check whether a repair was produced correctly.
+This table allows engineers to inspect repair results before merge.
 
-### 4.3 Manual Intervention Table Contract
-The manual intervention table exists to capture:
-- non-repairable payloads
-- policy-blocked records
-- CDC records requiring engineer review after threshold
-- poison-pill records
-- transport/deserialization rows that cannot be safely recovered
+Important behavior:
+- `fix_only_results` can contain rows that were later merged
+- It can also contain rows that were later routed to manual intervention
+- It is not a terminal outcome table
 
-Operationally, it is the authoritative holding area for records that must not be auto-merged.
+### 4.3 Manual Intervention Table
+Stores records that must not be automatically replayed.
 
-### 4.4 CDC Pending Replay Table Contract
-The CDC pending table exists to isolate CDC-specific replay complexity from generic replay.
+Typical cases include:
+- Non-repairable payloads
+- Policy violations
+- Poison-pill records
+- Corrupted transport data
+- Terminal discard outcomes in the Dataflow replay path
+- Merge failures that end in discard
 
-It stores cases such as:
+### 4.4 CDC Pending Table
+This table isolates CDC-related complexity from generic replay.
+
+Example CDC error types:
 - `DUPLICATE_MERGE_KEY`
 - `BATCH_DUPLICATE`
 - `VERSION_CONFLICT`
@@ -318,394 +372,402 @@ It stores cases such as:
 - `TOMBSTONE_WITHOUT_KEY`
 - `LATE_ARRIVING_EVENT`
 
-These records are terminal for generic replay but not resolved; they are queued for separate CDC-aware handling.
+These records are not resolved automatically and require CDC-aware handling.
 
-### 4.5 Auditability Expectations
-Operations must preserve:
-- DLQ failed timestamp
-- replay attempt count
-- whether row was reprocessed
-- fixed payload evidence
-- manual routing reason
-- CDC pending routing reason
-- main-table outcome where applicable
-
+### 4.5 Auditability Requirements
+Operational data must preserve:
+- DLQ failure timestamp
+- Replay attempt count
+- Reprocessed status
+- Fixed payload evidence
+- Routing reason
+- Target table outcome
+- Replay job ID where available
 
 ## 5. Replay Infrastructure
 
-### 5.1 Why the Scheduled Replay Stack Exists
-The scheduled stack exists to make replay:
-- repeatable
-- isolated from developer workstations
-- deployable through GCP-native controls
-- schedulable without manual intervention
+### 5.1 Purpose of the Scheduled Replay Stack
+The replay stack ensures that replay is:
+- Repeatable
+- Automated
+- Environment-controlled
+- Not dependent on developer workstations
 
 ### 5.2 Runtime Components
 
-| Component | Purpose / Notes |
+| Component | Purpose |
 |---|---|
-| Dataflow Flex Template | Runs the actual replay Beam pipeline |
-| Cloud Run launcher | Lightweight control-plane service that starts the Flex Template |
-| Cloud Scheduler | Calls the launcher on a schedule |
-| GCS template spec | Stores the Flex Template spec |
-| GCS config YAML | Stores replay config used by scheduled Dataflow runs |
+| Dataflow Flex Template | Executes the replay pipeline |
+| Cloud Run launcher | Starts Dataflow jobs |
+| Cloud Scheduler | Triggers replay runs |
+| GCS template spec | Stores Dataflow template |
+| GCS config YAML | Stores replay configuration |
+| Cloud Monitoring dashboard | Displays replay metrics |
+| Cloud Monitoring alerts | Sends notifications for manual-routing spikes and replay job failures |
 
-### 5.3 Infra Preparation Intent
-`setup_replay_infra.ps1` prepares the deployment prerequisites:
-- enables required APIs
-- creates service accounts
-- grants IAM roles
-- grants bucket access
-- creates retry input topic if needed
+### 5.3 Infrastructure Preparation
+The script `setup_replay_infra.ps1` prepares required infrastructure:
+- Enables GCP APIs
+- Creates service accounts
+- Grants IAM roles
+- Configures storage buckets
+- Creates retry Pub/Sub topics
 
-### 5.4 Readiness Criteria Before Replay Runs
-Replay is ready only when all are true:
+### 5.4 Replay Readiness Criteria
+Before running replay:
 - DLQ table exists and is queryable
-- target tables exist and schema is current
-- manual intervention table exists
+- Target tables exist and match expected schema
+- Manual intervention table exists
 - CDC pending table exists
-- retry topic exists if requeue is enabled
-- Flex Template is built
-- Cloud Run launcher is deployed
-- scheduler target is correct
+- Retry Pub/Sub topic exists
+- Flex template is built
+- Launcher is deployed
+- Scheduler configuration is correct
 - Dataflow worker service account has required permissions
+- Cloud Monitoring dashboard and alert policies are deployed if required
+- DLQ rows targeted for replay are outside the configured grace window
 
-Pre-Replay Gate  
-Check readiness before every production replay release, not just initial deployment.
+### 5.5 Ordering and Idempotency
+Replay pipelines guarantee deterministic outcomes by:
+- Using key-based merges
+- Performing row-level merge operations in the current Dataflow replay path
+- Avoiding blind CDC replay
+- Preventing infinite retry loops
 
-### 5.5 Ordering and Idempotency Principles
-Replay must preserve deterministic outcomes:
-- generic merge is key-based and idempotent
-- set-based merge is preferred where possible
-- complex type payloads use staging merge path
-- CDC cases are not blindly replayed in the generic path
-- poison-pill protection prevents infinite loops
-
+Note:
+- The current Dataflow replay implementation processes rows individually in the `DoFn`
+- Generic local replay logic may still batch differently, but scheduled Dataflow replay is currently row-oriented
 
 ## 6. Replay Lifecycle
 
-### 6.1 Core State Model
-There are two operational state models.
+### 6.1 State Model
 
-**DLQ row state**
-- `reprocessed = false`: eligible for replay
-- `reprocessed = true`: terminal for generic replay
+**DLQ Row States**
 
-**CDC pending state**
+| State | Meaning |
+|---|---|
+| `reprocessed = false` | Eligible for replay |
+| `reprocessed = true` | Replay completed |
+
+**CDC Pending States**
 - `PENDING`
-- later CDC replay states such as:
-  - `REPLAYED`
-  - `DISCARDED_DUPLICATE`
-  - `MANUAL_ESCALATED`
-  - `PENDING` with next retry
+- `REPLAYED`
+- `DISCARDED_DUPLICATE`
+- `MANUAL_ESCALATED`
 
 ### 6.2 Lifecycle Semantics
-For generic replay:
-- rows start as `reprocessed = false`
-- after replay action they become terminal or pending for next run
-- operational failures may increment retry and stay pending
-- manual and CDC routing are terminal for the generic replay path
+- Rows begin with `reprocessed = false`
+- Replay processes them
+- Rows become terminal or pending
+- Manual and CDC routing are terminal for generic replay
+- Operational failures may stay pending for later rerun
 
 ### 6.3 Batch Processing Model
-A standard generic replay batch:
-1. fetches unreprocessed DLQ rows ordered by `failed_timestamp`
-2. processes row-level routing and repairs
-3. batches mergeable payloads by target table
-4. runs set-based merge first
-5. falls back to row-by-row merge if needed
-6. updates DLQ state
+Replay batch processing steps:
+1. Fetch rows ordered by `failed_timestamp`
+2. Apply routing and repair logic
+3. Attempt row-level merge for eligible rows
+4. Update DLQ state
+5. Route discards to manual intervention
+6. Route CDC cases to pending table
 
-### 6.4 Idempotency Expectations
-Replay runs must tolerate:
-- reruns of the same Dataflow job scope
-- repeated scheduler invocations across days
-- previously fixed rows re-entering the pipeline as new DLQ rows
-- requeue of operational rows followed by later data-fix replay
+### 6.4 Idempotency
+Replay must tolerate:
+- Multiple scheduler runs
+- Job reruns
+- Duplicate replay attempts
+- Operational requeue cycles
 
-### 6.5 Completion Criteria for an Operational Run
-A replay run is operationally complete when:
-- targeted DLQ rows are no longer unexpectedly left at `reprocessed = false`
-- manual-routed rows are visible in the manual intervention table
-- CDC-routed rows are visible in the CDC pending table
-- retryable operational rows have been republished successfully where applicable
-- target-table rows appear with correct repaired values
+### 6.5 Completion Criteria
+Replay is considered successful when:
+- No unexpected `reprocessed = false` records remain for the eligible replay window
+- Manual routed records appear in the manual table
+- CDC routed records appear in the pending table
+- Retry messages were successfully republished
+- Target tables reflect repaired data
 
 ### 6.6 Partial Replay Handling
-If only part of the backlog succeeds:
-- identify whether failures are merge-path, schema, or routing related
-- inspect fix-only output
-- inspect manual intervention growth
-- inspect CDC pending growth
-- rerun after root-cause correction
+If only part of the replay succeeds:
+- Investigate merge path failures
+- Inspect fix-only results
+- Inspect manual intervention table
+- Inspect CDC pending table
+- Rerun replay after correcting root cause
 
+## 7. Monitoring, Metrics, and Operational Evidence
 
-## 7. Operational Queries and Evidence Views
-
-### 7.1 Primary Operational Surfaces
-This project currently relies on BigQuery operational queries rather than prebuilt dashboards.
-
-Primary evidence surfaces:
+### 7.1 Evidence Sources
+Operational visibility is provided through:
 - DLQ table
-- fix-only output table
-- manual intervention table
+- Fix-only output table
+- Manual intervention table
 - CDC pending table
-- Cloud Monitoring metric `dataflow.googleapis.com/job/user_counter` filtered to `manual_intervention_routed`
-- Cloud Monitoring dashboard for replay counters
 - Dataflow job logs
 - Cloud Run launcher logs
-- Scheduler execution history
+- Cloud Scheduler history
+- Cloud Monitoring metrics
+- Cloud Monitoring dashboard
+- Cloud Monitoring alerts
 
-### 7.2 Interpretation Guidance
-- Rising DLQ with low manual volume suggests replay has not run or target merge path is blocked.
-- Rising manual volume suggests schema, payload, or policy drift.
-- Rising CDC pending volume suggests state-aware CDC cases are accumulating faster than they are being handled.
-- Reprocessed growth without target-table change suggests replay is requeueing or terminal-routing rather than merging.
+### 7.2 Dataflow Custom Metrics
+Current Dataflow custom counters include:
+- `fetched`
+- `fixed_only`
+- `replayed`
+- `fixed_and_replayed`
+- `discarded`
+- `discarded_routed_to_manual`
+- `manual_intervention_routed`
+- `cdc_pending_routed`
+- `merge_failed`
+- `failed`
 
-### 7.3 Evidence Capture Expectations
-For incident closure, capture:
-- scheduler run time
-- launcher invocation result
+Operationally:
+- `discarded` counts all terminal discards
+- `discarded_routed_to_manual` is the preferred operator-facing metric for discarded rows persisted to manual intervention
+- `manual_intervention_routed` still exists internally but should not be treated as the primary business-facing discard metric
+
+### 7.3 Dashboard Interpretation Guidance
+
+| Signal | Interpretation |
+|---|---|
+| `fetched` | DLQ records pulled into the replay run |
+| `fixed_and_replayed` | Rows successfully repaired and merged |
+| `replayed` | Rows replayed without needing a repair path |
+| `discarded_routed_to_manual` | Terminal discard outcomes persisted to manual intervention |
+| `cdc_pending_routed` | CDC-specific rows diverted out of generic replay |
+| `merge_failed` | Merge attempts that failed before final outcome resolution |
+| `failed` | Replay processing failures at the Dataflow worker level |
+
+Important:
+- Monitoring counters are operational signals, not full table-of-record truth
+- BigQuery tables remain the source of truth for exact row accounting
+
+### 7.4 Evidence Collection for Incidents
+Capture the following:
+- Scheduler execution time
+- Launcher invocation status
 - Dataflow job ID
-- number of rows fetched
-- number merged
-- number manual-routed
-- number CDC-routed
-- number requeued
-- residual backlog size
-
+- Rows fetched
+- Rows merged
+- Rows routed to manual intervention
+- Rows routed to CDC pending
+- Rows requeued
+- Remaining DLQ backlog
 
 ## 8. Operations Procedures
 
-### 8.1 Daily Health Procedure
-- confirm scheduler ran at expected time
-- confirm launcher accepted request
-- confirm Dataflow job launched successfully
-- confirm no unusual DLQ growth
-- confirm manual table growth is within expected bounds
-- confirm CDC pending backlog is stable
+### 8.1 Daily Health Check
+Daily checks should verify:
+- Scheduler executed successfully
+- Launcher accepted request
+- Dataflow job launched
+- DLQ backlog stable
+- Manual intervention volume within expectations
+- CDC pending backlog stable
+- Monitoring dashboard is receiving replay counters
+- Job failure alert and discard-to-manual alert policies are present
 
-### 8.2 Incident-Time Operating Procedure
-- identify whether the incident is generic replay, CDC routing, or requeue-related
-- confirm latest replay deployment version
-- inspect fix-only output for a representative failing row
-- inspect Dataflow worker error for merge/path issues
-- verify target schema for failing rows
-- determine whether rerun is safe or whether config/code correction is required first
+### 8.2 Incident Response Procedure
+Steps:
+1. Identify incident category: generic replay, CDC, requeue, or infra
+2. Confirm latest deployment version
+3. Inspect fix-only results
+4. Inspect Dataflow worker logs
+5. Verify schema compatibility
+6. Determine if replay rerun is safe
 
 ### 8.3 Replay Trigger Procedure
-For manual immediate replay:
-- use `run_dataflow_replay.ps1` for ad hoc testing
-- or call the deployed launcher endpoint once manually in GCP
 
-For scheduled replay:
-- Cloud Scheduler triggers Cloud Run launcher
-- launcher starts Dataflow Flex Template
-- no workstation is required
+**Manual Replay**  
+Use:
+- `run_dataflow_replay.ps1`
+- or trigger the launcher endpoint
 
-### 8.4 Post-Replay Verification Procedure
-- verify expected rows in target table
-- verify repaired rows in fix-only output
-- verify manual-routed rows in manual table
-- verify CDC-routed rows in pending table
-- verify DLQ retry counts and reprocessed status
+**Scheduled Replay**  
+Replay runs automatically through:
+- Cloud Scheduler
+- Cloud Run Launcher
+- Dataflow Flex Template
 
-### 8.5 Pre-Release / Post-Release Procedure
+### 8.4 Post-Replay Verification
+Verify:
+- Target table rows
+- Fix-only output entries
+- Manual intervention records
+- CDC pending records
+- DLQ retry counts
+- Monitoring counters for the replay run
 
-**Before release**
-- validate `.env.job.yaml`
-- validate Flex Template build path
-- validate launcher environment variables
-- validate scheduler target and cadence
-- validate target schemas for expected replay cases
+### 8.5 Release Procedures
 
-**After release**
-- trigger one controlled replay
-- verify Dataflow launch success
-- verify one repaired merge case
-- verify one manual-routing case
-- verify one requeue case if enabled
+**Before Release**
+- Validate configuration
+- Validate template build
+- Validate launcher configuration
+- Validate scheduler configuration
+- Confirm schema compatibility
+- Confirm dashboard and alert scripts still match active metrics
 
-### 8.6 Historical Replay / Backfill Procedure
+**After Release**
+- Run controlled replay
+- Confirm merge case
+- Confirm manual routing
+- Confirm requeue behaviour
+- Confirm manual alert can trigger
+- Confirm replay job failure alert is scoped correctly
+
+### 8.6 Historical Backfill Procedure
 When replaying historical backlog:
-- reduce batch size initially
-- verify target schema stability first
-- monitor manual table growth closely
-- confirm CDC cases are not being forced through generic replay
-- scale up only after correctness is confirmed
+- Start with small batch sizes
+- Verify schema stability
+- Monitor manual table growth
+- Avoid forcing CDC cases through generic replay
+- Ensure rows are outside the DLQ update grace window
 
-### 8.7 Operational Anti-Patterns to Avoid
-
-Anti-Pattern 1  
-Running repeated replay jobs without checking whether failures are deterministic payload issues or operational issues.
-
-Anti-Pattern 2  
-Deleting DLQ records to reduce backlog appearance.
-
-Anti-Pattern 3  
-Treating CDC sequencing errors as generic replay cases.
-
-Anti-Pattern 4  
-Changing replay config and target schema at the same time without controlled validation.
-
-Anti-Pattern 5  
-Ignoring fix-only output during troubleshooting.
-
+### 8.7 Operational Anti-Patterns
+Avoid:
+1. Running repeated replay jobs without diagnosis
+2. Deleting DLQ records
+3. Treating CDC sequencing errors as generic replay
+4. Changing config and schema simultaneously
+5. Ignoring fix-only output during troubleshooting
+6. Assuming Monitoring counters are exact row-truth for BigQuery tables
 
 ## 9. Troubleshooting
 
-### 9.1 Problem: DLQ Backlog Grows Continuously
+### 9.1 DLQ Backlog Growth
+Possible causes:
+- Scheduler failure
+- Launcher failure
+- Dataflow job failures
+- Increased upstream errors
+- DLQ update grace window delaying eligibility
 
-**Likely Causes**
-- replay scheduler not firing
-- launcher failing to start Dataflow
-- Dataflow jobs failing before merge
-- high upstream failure rate
+Resolution:
+- Inspect scheduler logs
+- Inspect Cloud Run logs
+- Inspect Dataflow job state
+- Confirm whether the oldest unreprocessed rows are still inside the grace window
 
-**Diagnosis**
-- check scheduler execution history
-- check Cloud Run launcher logs
-- check Dataflow job state
-- query `DLQ_TABLE` for oldest unreprocessed rows
+### 9.2 Records Remain Unprocessed
+Possible causes:
+- Merge failure
+- Schema mismatch
+- Retry state
+- DLQ terminal update miss
+- Rows still inside grace window
 
-**Resolution**
-- restore scheduler or launcher path
-- fix deployment/config issues
-- rerun replay manually with limited scope
-- confirm backlog begins to decline
+Resolution:
+- Inspect Dataflow logs
+- Inspect fix-only output
+- Rebuild Flex template
+- Confirm whether `DLQ_ID_COLUMN` exists and is configured
 
-### 9.2 Problem: Rows Stay `reprocessed = false`
+### 9.3 CDC Pending Backlog Growth
+Possible causes:
+- CDC sequencing issues
+- Missing CDC replay consumer
 
-**Likely Causes**
-- merge failure
-- target schema mismatch
-- operational merge error marked retry-pending
-- Dataflow job using stale code/template
+Resolution:
+- Analyze CDC error types
+- Stabilize upstream CDC contract
+- Implement CDC-aware replay logic
 
-**Diagnosis**
-- inspect Dataflow worker logs for exact row failure
-- inspect fix-only output for repaired payload
-- confirm target schema at runtime
-- confirm Flex Template was rebuilt after code changes
+### 9.4 Manual Intervention Volume Spike
+Possible causes:
+- Schema drift
+- Payload format change
+- Configuration error
+- New deterministic discard path
+- Merge failures ending in discard
 
-**Resolution**
-- fix merge-path or schema issue
-- rebuild Flex Template
-- rerun replay
-- verify row becomes terminal
+Resolution:
+- Inspect routing reasons
+- Update deterministic repair logic
+- Correlate with `discarded_routed_to_manual`
 
-### 9.3 Problem: CDC Pending Backlog Grows
+### 9.5 Scheduler / Launcher Failure
+Possible causes:
+- Incorrect GCS template path
+- Missing IAM permissions
+- Invalid launcher configuration
 
-**Likely Causes**
-- many CDC sequencing/idempotency errors reaching generic replay
-- no CDC-specific replay consumer yet
-- source stream contract drift
+Resolution:
+- Correct configuration
+- Redeploy launcher
+- Rerun replay
 
-**Diagnosis**
-- query pending table by `error_type`
-- inspect route reasons
-- identify whether issue is sequence, version, or envelope related
+### 9.6 Incorrect Target Data After Replay
+Possible causes:
+- Incorrect repair logic
+- Merge key mismatch
+- Wrong target table
+- Duplicate merge keys collapsing multiple replayed events into one final target row
 
-**Resolution**
-- stabilise upstream CDC contract
-- implement/operate CDC-specific replay worker
-- manually review and resolve oldest pending records first
+Resolution:
+- Compare original, fixed, and merged payload
+- Correct routing logic
+- Rebuild template
 
-### 9.4 Problem: Manual Intervention Volume Spikes
+### 9.7 DLQ Update Reliability Problems
+Symptom:
+- Row exists in manual intervention table
+- Same DLQ row still shows `reprocessed = false`
 
-**Likely Causes**
-- target schema drift
-- new payload format
-- transport corruption spike
-- bad deployment or wrong environment config
+Likely cause:
+- DLQ terminal update missed or failed after the manual write
+- `DLQ_ID_COLUMN` is absent, so replay used fallback composite row matching
 
-**Diagnosis**
-- inspect `reason` values in manual table
-- group by error type
-- compare to recent schema/config changes
-
-**Resolution**
-- fix schema/config mismatch
-- update deterministic repairs if safe
-- rerun replay after correction
-
-### 9.5 Problem: Scheduler / Launcher / Flex Template Fails
-
-**Likely Causes**
-- wrong GCS template path
-- wrong config YAML GCS path
-- missing IAM on launcher or Dataflow SA
-- invalid Cloud Run launcher env vars
-
-**Diagnosis**
-- check Cloud Run launcher response and logs
-- check Dataflow launch API error
-- verify template and config files exist in GCS
-- verify service account permissions
-
-**Resolution**
-- correct GCS paths
-- grant missing IAM
-- redeploy launcher or rebuild Flex Template
-- rerun one controlled launch
-
-### 9.6 Problem: Replay Completes But Target Data Looks Wrong
-
-**Likely Causes**
-- repair logic produced technically valid but semantically wrong data
-- merge key mismatch
-- wrong target table resolution
-- CDC-style cases were merged through generic path unexpectedly
-
-**Diagnosis**
-- compare original message, fixed message, and target row
-- validate merge key and target table
-- inspect fix notes in fix-only output
-- inspect worker logs for fallback merge behaviour
-
-**Resolution**
-- correct fix logic or routing rule
-- rebuild template
-- rerun affected scope with controlled limit
-
+Recommended fix:
+- Add a stable `dlq_id` column to the DLQ table
+- Populate it at DLQ write time
+- Set `DLQ_ID_COLUMN: "dlq_id"`
+- Validate DML affected-row count during terminal updates
 
 ## 10. DLQ Replay Execution Procedure
 
-### Step 1. Prepare Environment
-Update [.env.job.yaml](/c:/Users/sreer/Desktop/da/dlq_replay/.env.job.yaml) with the target environment values.
+### Step 1 — Prepare Environment
+Update the configuration file:
+`.env.job.yaml`
 
-Core values to validate:
+Example values:
 ```yaml
 PROJECT_ID: "stream-accelerator-3"
 LOCATION: "us-central1"
 DLQ_TABLE: "stream-accelerator-3.dataengineering.streaming_data_dlq"
 DEFAULT_TARGET_TABLE: "stream-accelerator-3.dataengineering.streaming_data"
 MERGE_KEY: "event_id"
-RETRY_INPUT_TOPIC: "projects/stream-accelerator-3/topics/dlq_replay_retry_test"
+RETRY_INPUT_TOPIC: "projects/stream-accelerator-3/topics/data-ingestion-topic-test"
 MANUAL_INTERVENTION_TABLE: "stream-accelerator-3.dataengineering.manual_intervention"
 CDC_PENDING_TABLE: "stream-accelerator-3.dataengineering.cdc_pending_replay"
+DLQ_UPDATE_GRACE_MINUTES: "15"
 ```
 
-### Step 2. Prepare Replay Infrastructure
+### Step 2 — Prepare Replay Infrastructure
+Run:
 ```powershell
 .\scripts\setup_replay_infra.ps1 `
   -ProjectId "stream-accelerator-3" `
   -Region "us-central1" `
-  -TempBucket "gs://dlq_replay" `
-  -StagingBucket "gs://dlq_replay" `
-  -TemplateBucket "gs://dlq_replay" `
-  -RetryInputTopic "projects/stream-accelerator-3/topics/dlq_replay_retry_test"
+  -TempBucket $bucket `
+  -StagingBucket $bucket `
+  -TemplateBucket $bucket `
+  -RetryInputTopic "projects/stream-accelerator-3/topics/data-ingestion-topic-test"
 ```
 
-### Step 3. Build and Stage the Flex Template
+### Step 3 — Build and Stage Flex Template
+Run:
 ```powershell
 .\scripts\deploy_replay_flextemplate.ps1 `
   -ProjectId "stream-accelerator-3" `
   -Region "us-central1" `
-  -TemplateBucket "gs://dlq_replay" `
+  -TemplateBucket $bucket `
   -ConfigYaml ".env.job.yaml"
 ```
 
-### Step 4. Deploy the Launcher
+### Step 4 — Deploy Replay Launcher
+Run:
 ```powershell
 .\scripts\deploy_replay_launcher.ps1 `
   -ProjectId "stream-accelerator-3" `
@@ -718,18 +780,20 @@ CDC_PENDING_TABLE: "stream-accelerator-3.dataengineering.cdc_pending_replay"
   -DataflowServiceAccount "dlq-replay-dataflow-sa@stream-accelerator-3.iam.gserviceaccount.com"
 ```
 
-### Step 5. Create the Scheduler
+### Step 5 — Create Scheduler
+Run:
 ```powershell
 .\scripts\create_replay_scheduler.ps1 `
   -ProjectId "stream-accelerator-3" `
   -Region "us-central1" `
   -SchedulerJobName "run-dlq-replay-nightly" `
   -LauncherServiceName "dlq-replay-launcher" `
-  -Schedule "0 23 * * *" `
+  -Schedule "0 11 * * *" `
   -TimeZone "Asia/Calcutta"
 ```
 
-### Step 6. Create the Manual Intervention Alert
+### Step 6 — Create Discard-To-Manual Alert
+Run:
 ```powershell
 .\scripts\deploy_manual_intervention_alert.ps1 `
   -ProjectId "stream-accelerator-3" `
@@ -737,46 +801,52 @@ CDC_PENDING_TABLE: "stream-accelerator-3.dataengineering.cdc_pending_replay"
   -ConfigYaml ".env.job.yaml"
 ```
 
-### Step 7. Deploy the Replay Dashboard
+This alert currently watches:
+- `discarded_routed_to_manual`
+
+### Step 7 — Create Replay Job Failure Alert
+Run:
+```powershell
+.\scripts\deploy_replay_job_failure_alert.ps1 `
+  -ProjectId "stream-accelerator-3" `
+  -Region "us-central1" `
+  -ConfigYaml ".env.job.yaml" `
+  -JobNamePrefix "dlq-replay"
+```
+
+### Step 8 — Deploy Replay Dashboard
+Run:
 ```powershell
 .\scripts\deploy_replay_dashboard.ps1 `
   -ProjectId "stream-accelerator-3" `
   -Region "us-central1"
 ```
 
-### Step 8. Trigger Replay Manually (Immediate Run)
-Option 1: submit ad hoc Dataflow directly
+### Step 9 — Trigger Replay Manually
+
+**Option 1: Direct Dataflow Execution**
 ```powershell
-.\scripts\run_dataflow_replay.ps1 `
-  -ProjectId "stream-accelerator-3" `
-  -Region "us-central1" `
-  -JobName "dlq-replay-manual-$(Get-Date -Format yyyyMMdd-HHmmss)" `
-  -TempLocation "gs://dlq_replay/dataflow/tmp" `
-  -StagingLocation "gs://dlq_replay/dataflow/staging" `
-  -ConfigYaml ".env.job.yaml" `
-  -Limit 100 `
-  -PythonExe "python"
+.\scripts\run_dataflow_replay.ps1
 ```
 
-Option 2: trigger the deployed scheduler job
+**Option 2: Trigger Scheduler**
 ```powershell
 gcloud scheduler jobs run run-dlq-replay-nightly `
   --location us-central1 `
   --project stream-accelerator-3
 ```
 
-### Step 9. Check DLQ Replay Status
+### Step 10 — Check DLQ Replay Status
+Example:
 ```sql
 SELECT
-  COUNT(*) AS total_unreprocessed,
-  COUNTIF(error_type = 'BIGQUERY_INSERT_FAILED') AS bq_insert_failed,
-  COUNTIF(error_type = 'DESERIALIZATION_ERROR') AS deserialization_errors,
-  COUNTIF(error_type IN ('OUT_OF_ORDER_EVENT','SEQUENCE_GAP_DETECTED','CAUSALITY_VIOLATION')) AS cdc_ordering_errors
+  COUNT(*) AS total_unreprocessed
 FROM `stream-accelerator-3.dataengineering.streaming_data_dlq`
 WHERE reprocessed = FALSE;
 ```
 
-### Step 10. Check CDC Pending Queue
+### Step 11 — Check CDC Pending Queue
+Example:
 ```sql
 SELECT
   status,
@@ -787,7 +857,8 @@ GROUP BY status, error_type
 ORDER BY cnt DESC;
 ```
 
-### Step 11. Verify Recent Fixes
+### Step 12 — Verify Recent Fixes
+Example:
 ```sql
 SELECT
   error_type,
@@ -799,18 +870,19 @@ ORDER BY processed_at DESC
 LIMIT 50;
 ```
 
-### Step 12. Verify Manual Intervention Volume
+### Step 13 — Verify Manual Intervention Volume
+Example:
 ```sql
 SELECT
   reason,
   COUNT(*) AS cnt
 FROM `stream-accelerator-3.dataengineering.manual_intervention`
 GROUP BY reason
-ORDER BY cnt DESC
-LIMIT 50;
+ORDER BY cnt DESC;
 ```
 
-### Step 13. Validate Main Table After Replay
+### Step 14 — Validate Main Table
+Example:
 ```sql
 SELECT
   event_id,
@@ -821,7 +893,12 @@ HAVING cnt > 1
 LIMIT 20;
 ```
 
-### Step 14. Recovery if Replay Fails Mid-Run
-Use the latest Dataflow job logs first.  
-Do not reset or delete DLQ rows blindly.  
-Correct the underlying issue, rebuild the Flex Template if code changed, and rerun replay with a limited scope first.
+### Step 15 — Recovery if Replay Fails
+If replay fails mid-run:
+1. Inspect Dataflow job logs
+2. Identify root cause
+3. Correct configuration or code
+4. Rebuild Flex Template if required
+5. Rerun replay with limited scope
+
+Never delete DLQ records as a recovery action.

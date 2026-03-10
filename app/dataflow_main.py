@@ -46,6 +46,7 @@ class ReplayRowDoFn(beam.DoFn):
         self._replayed = Metrics.counter("dlq_replay", "replayed")
         self._fixed_and_replayed = Metrics.counter("dlq_replay", "fixed_and_replayed")
         self._discarded = Metrics.counter("dlq_replay", "discarded")
+        self._discarded_routed_to_manual = Metrics.counter("dlq_replay", "discarded_routed_to_manual")
         self._cdc_pending_routed = Metrics.counter("dlq_replay", "cdc_pending_routed")
         self._manual_intervention_routed = Metrics.counter("dlq_replay", "manual_intervention_routed")
         self._merge_failed = Metrics.counter("dlq_replay", "merge_failed")
@@ -58,8 +59,21 @@ class ReplayRowDoFn(beam.DoFn):
 
     def _route_to_manual_intervention(self, row: dict[str, Any], reason: str, parsed_for_manual: Any = None):
         """Routes the row to manual intervention."""
+        self._discard_to_manual(row, reason, "manual_intervention_route", parsed_for_manual)
+
+    def _discard_to_manual(
+        self,
+        row: dict[str, Any],
+        reason: str,
+        fix_applied: str,
+        parsed_for_manual: Any = None,
+        target_table: str | None = None,
+    ):
         assert self._repo is not None
         config = self._repo.config
+        terminal_fix_applied = fix_applied
+        if not terminal_fix_applied.startswith("manual_intervention_"):
+            terminal_fix_applied = f"manual_intervention_{terminal_fix_applied}"
 
         if parsed_for_manual is None:
             parsed_for_manual = row.get("original_message")
@@ -75,16 +89,17 @@ class ReplayRowDoFn(beam.DoFn):
             row=row,
             fixed_message=parsed_for_manual,
             reason=reason,
-            target_table=row.get("table_name"),
+            target_table=target_table or row.get("table_name"),
         )
-        self._manual_intervention_routed.inc()
         outcome = ReplayOutcome(
             decision="DISCARD",
-            fix_applied="manual_intervention_route",
+            fix_applied=terminal_fix_applied,
             discard_reason=reason,
-            target_table=None,
+            target_table=target_table,
         )
         self._repo.mark_terminal(row, outcome.decision, outcome.fix_applied, outcome.discard_reason, dry_run=config.dry_run)
+        self._manual_intervention_routed.inc()
+        self._discarded_routed_to_manual.inc()
         self._discarded.inc()
         logging.warning("Routed to manual intervention: %s", {**self._row_for_log(row), "discard_reason": outcome.discard_reason})
 
@@ -119,12 +134,7 @@ class ReplayRowDoFn(beam.DoFn):
         return False
 
     def _mark_terminal_discard(self, row: dict[str, Any], reason: str, fix_applied: str):
-        assert self._repo is not None
-        config = self._repo.config
-        outcome = ReplayOutcome(decision="DISCARD", fix_applied=fix_applied, discard_reason=reason, target_table=None)
-        self._repo.mark_terminal(row, outcome.decision, outcome.fix_applied, outcome.discard_reason, dry_run=config.dry_run)
-        self._discarded.inc()
-        logging.info("Discarded DLQ row: %s", {**self._row_for_log(row), **asdict(outcome)})
+        self._discard_to_manual(row, reason, fix_applied)
 
     def process(self, row_obj: dict[str, Any]):
         assert self._repo is not None
@@ -170,22 +180,12 @@ class ReplayRowDoFn(beam.DoFn):
                 elif not isinstance(parsed_for_manual, (dict, list)):
                     parsed_for_manual = {"_raw_original_message": str(parsed_for_manual)}
                 reason = f"manual_intervention_poison_pill_reprocessing_loop_detected:{retry_count}"
-                self._repo.write_manual_intervention_result(
-                    row=row,
-                    fixed_message=parsed_for_manual,
-                    reason=reason,
-                    target_table=row.get("table_name"),
+                self._discard_to_manual(
+                    row,
+                    reason,
+                    "manual_intervention_poison_pill_reprocessing_loop_route",
+                    parsed_for_manual,
                 )
-                self._manual_intervention_routed.inc()
-                outcome = ReplayOutcome(
-                    decision="DISCARD",
-                    fix_applied="manual_intervention_poison_pill_reprocessing_loop_route",
-                    discard_reason=reason,
-                    target_table=None,
-                )
-                self._repo.mark_terminal(row, outcome.decision, outcome.fix_applied, outcome.discard_reason, dry_run=config.dry_run)
-                self._discarded.inc()
-                logging.warning("Discarded DLQ row by loop-detection guard: %s", {**row_for_log, "discard_reason": outcome.discard_reason})
                 return
 
             if _is_cdc_pending_error_type(row.get("error_type")):
@@ -239,27 +239,12 @@ class ReplayRowDoFn(beam.DoFn):
                     except json.JSONDecodeError:
                         parsed_for_manual = {"_raw_original_message": parsed_for_manual}
                 reason = f"manual_intervention_dlq_publish_failed:{str(row.get('error_message') or '')[:200]}"
-                self._repo.write_manual_intervention_result(
-                    row=row,
-                    fixed_message=parsed_for_manual,
-                    reason=reason,
-                    target_table=row.get("table_name"),
-                )
-                self._manual_intervention_routed.inc()
-                outcome = ReplayOutcome(
-                    decision="DISCARD",
-                    fix_applied="manual_intervention_dlq_publish_failed_route",
-                    discard_reason=reason,
-                    target_table=None,
-                )
-                self._repo.mark_terminal(
+                self._discard_to_manual(
                     row,
-                    outcome.decision,
-                    outcome.fix_applied,
-                    outcome.discard_reason,
-                    dry_run=config.dry_run,
+                    reason,
+                    "manual_intervention_dlq_publish_failed_route",
+                    parsed_for_manual,
                 )
-                self._discarded.inc()
                 return
 
             if _is_observability_manual_error_type(row.get("error_type")):
@@ -270,27 +255,12 @@ class ReplayRowDoFn(beam.DoFn):
                     except json.JSONDecodeError:
                         parsed_for_manual = {"_raw_original_message": parsed_for_manual}
                 reason = f"manual_intervention_observability_error_type:{row.get('error_type')}:{str(row.get('error_message') or '')[:200]}"
-                self._repo.write_manual_intervention_result(
-                    row=row,
-                    fixed_message=parsed_for_manual,
-                    reason=reason,
-                    target_table=row.get("table_name"),
-                )
-                self._manual_intervention_routed.inc()
-                outcome = ReplayOutcome(
-                    decision="DISCARD",
-                    fix_applied="manual_intervention_observability_error_type_route",
-                    discard_reason=reason,
-                    target_table=None,
-                )
-                self._repo.mark_terminal(
+                self._discard_to_manual(
                     row,
-                    outcome.decision,
-                    outcome.fix_applied,
-                    outcome.discard_reason,
-                    dry_run=config.dry_run,
+                    reason,
+                    "manual_intervention_observability_error_type_route",
+                    parsed_for_manual,
                 )
-                self._discarded.inc()
                 return
 
             if _is_partition_decorator_failure(
@@ -308,27 +278,12 @@ class ReplayRowDoFn(beam.DoFn):
                     "manual_intervention_partition_decorator_failure:"
                     f"{str(row.get('error_message') or '')[:200]}"
                 )
-                self._repo.write_manual_intervention_result(
-                    row=row,
-                    fixed_message=parsed_for_manual,
-                    reason=reason,
-                    target_table=row.get("table_name"),
-                )
-                self._manual_intervention_routed.inc()
-                outcome = ReplayOutcome(
-                    decision="DISCARD",
-                    fix_applied="manual_intervention_partition_decorator_route",
-                    discard_reason=reason,
-                    target_table=None,
-                )
-                self._repo.mark_terminal(
+                self._discard_to_manual(
                     row,
-                    outcome.decision,
-                    outcome.fix_applied,
-                    outcome.discard_reason,
-                    dry_run=config.dry_run,
+                    reason,
+                    "manual_intervention_partition_decorator_route",
+                    parsed_for_manual,
                 )
-                self._discarded.inc()
                 return
 
             if _is_manual_intervention_error_type(row.get("error_type")):
@@ -339,27 +294,12 @@ class ReplayRowDoFn(beam.DoFn):
                     except json.JSONDecodeError:
                         parsed_for_manual = {"_raw_original_message": parsed_for_manual}
                 reason = f"manual_intervention_error_type:{row.get('error_type')}:{str(row.get('error_message') or '')[:200]}"
-                self._repo.write_manual_intervention_result(
-                    row=row,
-                    fixed_message=parsed_for_manual,
-                    reason=reason,
-                    target_table=row.get("table_name"),
-                )
-                self._manual_intervention_routed.inc()
-                outcome = ReplayOutcome(
-                    decision="DISCARD",
-                    fix_applied="manual_intervention_error_type_route",
-                    discard_reason=reason,
-                    target_table=None,
-                )
-                self._repo.mark_terminal(
+                self._discard_to_manual(
                     row,
-                    outcome.decision,
-                    outcome.fix_applied,
-                    outcome.discard_reason,
-                    dry_run=config.dry_run,
+                    reason,
+                    "manual_intervention_error_type_route",
+                    parsed_for_manual,
                 )
-                self._discarded.inc()
                 return
 
             if config.retry_input_topic and _is_requeue_error_type(row.get("error_type")):
@@ -406,47 +346,23 @@ class ReplayRowDoFn(beam.DoFn):
                         "manual_intervention_unrecoverable_transport_error:"
                         f"{str(row.get('error_type') or '')}:{parse_error}"
                     )
-                    self._repo.write_manual_intervention_result(
-                        row=row,
-                        fixed_message=parsed_for_manual,
-                        reason=reason,
-                        target_table=row.get("table_name"),
-                    )
-                    self._manual_intervention_routed.inc()
-                    outcome = ReplayOutcome(
-                        decision="DISCARD",
-                        fix_applied="manual_intervention_unrecoverable_transport_error_route",
-                        discard_reason=reason,
-                        target_table=None,
-                    )
-                    self._repo.mark_terminal(
+                    self._discard_to_manual(
                         row,
-                        outcome.decision,
-                        outcome.fix_applied,
-                        outcome.discard_reason,
-                        dry_run=config.dry_run,
+                        reason,
+                        "manual_intervention_unrecoverable_transport_error_route",
+                        parsed_for_manual,
                     )
-                    self._discarded.inc()
                     return
 
                 discard_reason = parse_error
-                outcome = ReplayOutcome(decision=decision, fix_applied="", discard_reason=discard_reason, target_table=None)
-                self._repo.mark_terminal(row, outcome.decision, outcome.fix_applied, outcome.discard_reason, dry_run=config.dry_run)
-                self._discarded.inc()
+                self._mark_terminal_discard(row, discard_reason, "")
                 return
 
             source_table_name = (row.get("table_name") or "").strip()
             try:
                 target_table = config.resolve_target_table(source_table_name)
             except ValueError:
-                outcome = ReplayOutcome(
-                    decision="DISCARD",
-                    fix_applied="routing_config_validation",
-                    discard_reason=f"unmapped_table_name:{source_table_name or 'empty'}",
-                    target_table=None,
-                )
-                self._repo.mark_terminal(row, outcome.decision, outcome.fix_applied, outcome.discard_reason, dry_run=config.dry_run)
-                self._discarded.inc()
+                self._mark_terminal_discard(row, f"unmapped_table_name:{source_table_name or 'empty'}", "routing_config_validation")
                 return
 
             try:
@@ -458,24 +374,15 @@ class ReplayRowDoFn(beam.DoFn):
                         target_table = config.resolve_target_table(attempted)
                         schema = self._repo.get_schema(target_table)
                     except (ValueError, NotFound):
-                        outcome = ReplayOutcome(
-                            decision="DISCARD",
-                            fix_applied="routing_config_validation",
-                            discard_reason=f"unmapped_attempted_table:{attempted}",
-                            target_table=None,
-                        )
-                        self._repo.mark_terminal(row, outcome.decision, outcome.fix_applied, outcome.discard_reason, dry_run=config.dry_run)
-                        self._discarded.inc()
+                        self._mark_terminal_discard(row, f"unmapped_attempted_table:{attempted}", "routing_config_validation")
                         return
                 else:
-                    outcome = ReplayOutcome(
-                        decision="DISCARD",
-                        fix_applied="routing_config_validation",
-                        discard_reason=f"destination_table_not_found:{target_table}",
+                    self._discard_to_manual(
+                        row,
+                        f"destination_table_not_found:{target_table}",
+                        "routing_config_validation",
                         target_table=target_table,
                     )
-                    self._repo.mark_terminal(row, outcome.decision, outcome.fix_applied, outcome.discard_reason, dry_run=config.dry_run)
-                    self._discarded.inc()
                     return
 
             if (not self._fix_only) and _is_operational_bq_insert_error(row.get("error_type"), row.get("error_message")):
@@ -513,27 +420,13 @@ class ReplayRowDoFn(beam.DoFn):
                             elif not isinstance(parsed_for_manual, (dict, list)):
                                 parsed_for_manual = {"_raw_original_message": str(parsed_for_manual)}
                             reason = f"manual_intervention_poison_pill_dlq_requeue_limit_hit:{retry_count + 1}"
-                            self._repo.write_manual_intervention_result(
-                                row=row,
-                                fixed_message=parsed_for_manual,
-                                reason=reason,
-                                target_table=target_table,
-                            )
-                            self._manual_intervention_routed.inc()
-                            outcome = ReplayOutcome(
-                                decision="DISCARD",
-                                fix_applied="manual_intervention_poison_pill_dlq_requeue_limit_route",
-                                discard_reason=reason,
-                                target_table=target_table,
-                            )
-                            self._repo.mark_terminal(
+                            self._discard_to_manual(
                                 row,
-                                outcome.decision,
-                                outcome.fix_applied,
-                                outcome.discard_reason,
-                                dry_run=config.dry_run,
+                                reason,
+                                "manual_intervention_poison_pill_dlq_requeue_limit_route",
+                                parsed_for_manual,
+                                target_table=target_table,
                             )
-                            self._discarded.inc()
                             return
                         if config.retry_input_topic:
                             published = self._repo.publish_to_retry_input_topic(
@@ -592,27 +485,13 @@ class ReplayRowDoFn(beam.DoFn):
             ]
             if manual_intervention_notes:
                 reason = ";".join(manual_intervention_notes[:5])
-                self._repo.write_manual_intervention_result(
-                    row=row,
-                    fixed_message=fixed_payload,
-                    reason=reason,
-                    target_table=target_table,
-                )
-                self._manual_intervention_routed.inc()
-                outcome = ReplayOutcome(
-                    decision="DISCARD",
-                    fix_applied=",".join(fix_notes),
-                    discard_reason=reason,
-                    target_table=target_table,
-                )
-                self._repo.mark_terminal(
+                self._discard_to_manual(
                     row,
-                    outcome.decision,
-                    outcome.fix_applied,
-                    outcome.discard_reason,
-                    dry_run=config.dry_run,
+                    reason,
+                    ",".join(fix_notes),
+                    fixed_payload,
+                    target_table=target_table,
                 )
-                self._discarded.inc()
                 return
 
             self._repo.write_fix_only_result(
@@ -640,14 +519,13 @@ class ReplayRowDoFn(beam.DoFn):
                     merge_key=config.merge_key,
                 )
                 if errors:
-                    outcome = ReplayOutcome(
-                        decision="DISCARD",
-                        fix_applied=",".join(fix_notes),
-                        discard_reason=";".join(errors[:5]),
+                    self._discard_to_manual(
+                        row,
+                        ";".join(errors[:5]),
+                        ",".join(fix_notes),
+                        fixed_payload,
                         target_table=target_table,
                     )
-                    self._repo.mark_terminal(row, outcome.decision, outcome.fix_applied, outcome.discard_reason, dry_run=config.dry_run)
-                    self._discarded.inc()
                     return
 
                 try:
@@ -662,20 +540,13 @@ class ReplayRowDoFn(beam.DoFn):
                     self._merge_failed.inc()
                     merge_err = str(merge_exc)
                     if _is_payload_merge_error(merge_err):
-                        outcome = ReplayOutcome(
-                            decision="DISCARD",
-                            fix_applied=",".join(fix_notes),
-                            discard_reason=merge_err[:500],
+                        self._discard_to_manual(
+                            row,
+                            merge_err[:500],
+                            ",".join(fix_notes),
+                            fixed_payload,
                             target_table=target_table,
                         )
-                        self._repo.mark_terminal(
-                            row,
-                            outcome.decision,
-                            outcome.fix_applied,
-                            outcome.discard_reason,
-                            dry_run=config.dry_run,
-                        )
-                        self._discarded.inc()
                         return
                     if _is_operational_merge_error(merge_err):
                         self._repo.mark_retry_pending(

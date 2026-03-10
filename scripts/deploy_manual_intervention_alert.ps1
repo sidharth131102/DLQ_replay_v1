@@ -97,7 +97,7 @@ $policy = @{
   displayName = $PolicyDisplayName
   documentation = @{
     content = @"
-Triggers when the summed delta of the Dataflow custom counter `manual_intervention_routed`
+Triggers when the Dataflow custom counter `discarded_routed_to_manual`
 exceeds the configured threshold for replay jobs in project `$ProjectId` and region `$Region`.
 
 Expected action:
@@ -112,12 +112,12 @@ Expected action:
   notificationChannels = @($notificationChannelName)
   conditions = @(
     @{
-      displayName = "Manual intervention routed count > $Threshold"
+      displayName = "Discarded routed to manual count > $Threshold"
       conditionThreshold = @{
         filter = @"
 metric.type="dataflow.googleapis.com/job/user_counter"
 resource.type="dataflow_job"
-metric.labels.metric_name="manual_intervention_routed"
+metric.labels.metric_name="discarded_routed_to_manual"
 "@ -replace "`r?`n", " "
         aggregations = @(
           @{
@@ -138,7 +138,7 @@ metric.labels.metric_name="manual_intervention_routed"
   )
   userLabels = @{
     service = "dlq_replay"
-    metric = "manual_intervention_routed"
+    metric = "discarded_routed_to_manual"
     launcher = $JobNamePrefix.Replace("_", "-")
   }
 }

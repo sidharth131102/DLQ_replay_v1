@@ -82,7 +82,7 @@
             {
               "timeSeriesQuery": {
                 "timeSeriesFilter": {
-                  "filter": "metric.type=\"dataflow.googleapis.com/job/user_counter\" resource.type=\"dataflow_job\" metric.labels.metric_name=\"discarded\"",
+                  "filter": "metric.type=\"dataflow.googleapis.com/job/user_counter\" resource.type=\"dataflow_job\" metric.labels.metric_name=\"discarded_routed_to_manual\"",
                   "aggregation": {
                     "alignmentPeriod": "180s",
                     "perSeriesAligner": "ALIGN_MAX",
@@ -92,22 +92,7 @@
                 }
               },
               "plotType": "LINE",
-              "legendTemplate": "Discarded"
-            },
-            {
-              "timeSeriesQuery": {
-                "timeSeriesFilter": {
-                  "filter": "metric.type=\"dataflow.googleapis.com/job/user_counter\" resource.type=\"dataflow_job\" metric.labels.metric_name=\"manual_intervention_routed\"",
-                  "aggregation": {
-                    "alignmentPeriod": "180s",
-                    "perSeriesAligner": "ALIGN_MAX",
-                    "crossSeriesReducer": "REDUCE_SUM",
-                    "groupByFields": []
-                  }
-                }
-              },
-              "plotType": "LINE",
-              "legendTemplate": "Manual Intervention Routed"
+              "legendTemplate": "Discarded Routed To Manual"
             },
             {
               "timeSeriesQuery": {
@@ -163,30 +148,11 @@
         }
       },
       {
-        "title": "Discarded",
+        "title": "Discarded Routed To Manual",
         "scorecard": {
           "timeSeriesQuery": {
             "timeSeriesFilter": {
-              "filter": "metric.type=\"dataflow.googleapis.com/job/user_counter\" resource.type=\"dataflow_job\" metric.labels.metric_name=\"discarded\"",
-              "aggregation": {
-                "alignmentPeriod": "180s",
-                "perSeriesAligner": "ALIGN_MAX",
-                "crossSeriesReducer": "REDUCE_SUM",
-                "groupByFields": []
-              }
-            }
-          },
-          "sparkChartView": {
-            "sparkChartType": "SPARK_LINE"
-          }
-        }
-      },
-      {
-        "title": "Manual Intervention Routed",
-        "scorecard": {
-          "timeSeriesQuery": {
-            "timeSeriesFilter": {
-              "filter": "metric.type=\"dataflow.googleapis.com/job/user_counter\" resource.type=\"dataflow_job\" metric.labels.metric_name=\"manual_intervention_routed\"",
+              "filter": "metric.type=\"dataflow.googleapis.com/job/user_counter\" resource.type=\"dataflow_job\" metric.labels.metric_name=\"discarded_routed_to_manual\"",
               "aggregation": {
                 "alignmentPeriod": "180s",
                 "perSeriesAligner": "ALIGN_MAX",
@@ -336,7 +302,7 @@
             {
               "timeSeriesQuery": {
                 "timeSeriesFilter": {
-                  "filter": "metric.type=\"dataflow.googleapis.com/job/user_counter\" resource.type=\"dataflow_job\" metric.labels.metric_name=\"discarded\"",
+                  "filter": "metric.type=\"dataflow.googleapis.com/job/user_counter\" resource.type=\"dataflow_job\" metric.labels.metric_name=\"discarded_routed_to_manual\"",
                   "aggregation": {
                     "alignmentPeriod": "180s",
                     "perSeriesAligner": "ALIGN_MAX",
@@ -346,22 +312,7 @@
                 }
               },
               "plotType": "LINE",
-              "legendTemplate": "Discarded"
-            },
-            {
-              "timeSeriesQuery": {
-                "timeSeriesFilter": {
-                  "filter": "metric.type=\"dataflow.googleapis.com/job/user_counter\" resource.type=\"dataflow_job\" metric.labels.metric_name=\"manual_intervention_routed\"",
-                  "aggregation": {
-                    "alignmentPeriod": "180s",
-                    "perSeriesAligner": "ALIGN_MAX",
-                    "crossSeriesReducer": "REDUCE_SUM",
-                    "groupByFields": []
-                  }
-                }
-              },
-              "plotType": "LINE",
-              "legendTemplate": "Manual Intervention Routed"
+              "legendTemplate": "Discarded Routed To Manual"
             },
             {
               "timeSeriesQuery": {
