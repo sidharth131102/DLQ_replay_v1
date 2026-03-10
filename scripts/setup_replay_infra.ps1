@@ -51,8 +51,12 @@ function Ensure-ServiceAccount {
     [Parameter(Mandatory = $true)][string]$DisplayName
   )
   $email = "$Name@$ProjectId.iam.gserviceaccount.com"
+  $prevErrorAction = $ErrorActionPreference
+  $ErrorActionPreference = "SilentlyContinue"
   & gcloud iam service-accounts describe $email --project $ProjectId 1>$null 2>$null
-  if ($LASTEXITCODE -ne 0) {
+  $exitCode = $LASTEXITCODE
+  $ErrorActionPreference = $prevErrorAction
+  if ($exitCode -ne 0) {
     Invoke-GCloud @(
       "iam", "service-accounts", "create", $Name,
       "--project", $ProjectId,
@@ -102,7 +106,11 @@ foreach ($role in @(
   "roles/bigquery.jobUser",
   "roles/bigquery.dataEditor",
   "roles/bigquery.dataViewer",
-  "roles/monitoring.metricWriter"
+  "roles/monitoring.metricWriter",
+  "roles/monitoring.viewer",
+  "roles/artifactregistry.reader",
+  "roles/storage.objectViewer",
+  "roles/pubsub.publisher"
 )) {
   Add-ProjectRole -ServiceAccountEmail $dataflowServiceAccount -Role $role
 }

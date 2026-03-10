@@ -52,10 +52,14 @@ Invoke-GCloud @(
   "--project", $ProjectId
 )
 
+$prevErrorAction = $ErrorActionPreference
+$ErrorActionPreference = "SilentlyContinue"
 & gcloud artifacts repositories describe $ArtifactRepositoryName `
   --project $ProjectId `
   --location $Region 1>$null 2>$null
-if ($LASTEXITCODE -ne 0) {
+$exitCode = $LASTEXITCODE
+$ErrorActionPreference = $prevErrorAction
+if ($exitCode -ne 0) {
   Invoke-GCloud @(
     "artifacts", "repositories", "create", $ArtifactRepositoryName,
     "--project", $ProjectId,
@@ -73,16 +77,33 @@ if (-not $ConfigYaml.StartsWith("gs://")) {
 }
 
 Invoke-GCloud @(
+  "auth", "configure-docker",
+  "$Region-docker.pkg.dev",
+  "--quiet"
+)
+
+
+Write-Host "`nBuilding Dataflow container image..."
+docker build -f Dockerfile.dataflow -t $imageUri .
+
+if ($LASTEXITCODE -ne 0) {
+  throw "Docker build failed."
+}
+
+Write-Host "`nPushing container image..."
+docker push $imageUri
+
+if ($LASTEXITCODE -ne 0) {
+  throw "Docker push failed."
+}
+
+
+Invoke-GCloud @(
   "dataflow", "flex-template", "build", $templateSpecPath,
   "--project", $ProjectId,
-  "--image-gcr-path", $imageUri,
+  "--image", $imageUri,
   "--sdk-language", "PYTHON",
-  "--flex-template-base-image", "PYTHON3",
-  "--metadata-file", $MetadataFile,
-  "--py-path", ".",
-  "--env", "FLEX_TEMPLATE_PYTHON_PY_FILE=app/dataflow_main.py",
-  "--env", "FLEX_TEMPLATE_PYTHON_REQUIREMENTS_FILE=requirements.txt",
-  "--env", "FLEX_TEMPLATE_PYTHON_SETUP_FILE=setup.py"
+  "--metadata-file", $MetadataFile
 )
 
 Write-Host "`nReplay Flex Template build complete."

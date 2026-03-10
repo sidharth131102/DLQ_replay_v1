@@ -68,8 +68,16 @@ Invoke-GCloud @(
   "--role", "roles/iam.serviceAccountTokenCreator"
 )
 
-& gcloud scheduler jobs describe $SchedulerJobName --project $ProjectId --location $Region 1>$null 2>$null
-$jobExists = $LASTEXITCODE -eq 0
+$jobExists = $false
+try {
+  & gcloud scheduler jobs describe $SchedulerJobName --project $ProjectId --location $Region 1>$null 2>$null
+  if ($LASTEXITCODE -eq 0) {
+    $jobExists = $true
+  }
+}
+catch {
+  $jobExists = $false
+}
 
 $commonArgs = @(
   "--project", $ProjectId,

@@ -117,14 +117,12 @@ Expected action:
         filter = @"
 metric.type="dataflow.googleapis.com/job/user_counter"
 resource.type="dataflow_job"
-resource.labels.project_id="$ProjectId"
-resource.labels.region="$Region"
 metric.labels.metric_name="manual_intervention_routed"
 "@ -replace "`r?`n", " "
         aggregations = @(
           @{
             alignmentPeriod = $AlignmentPeriod
-            perSeriesAligner = "ALIGN_DELTA"
+            perSeriesAligner = "ALIGN_MAX"
             crossSeriesReducer = "REDUCE_SUM"
             groupByFields = @()
           }
@@ -148,26 +146,31 @@ metric.labels.metric_name="manual_intervention_routed"
 $tmpPolicyFile = Join-Path $env:TEMP "dlq-replay-manual-intervention-alert.json"
 $policy | ConvertTo-Json -Depth 20 | Set-Content -Path $tmpPolicyFile -Encoding UTF8
 
-$existingPolicy = & gcloud alpha monitoring policies list `
-  --project $ProjectId `
-  --format "value(name)" `
-  --filter "displayName=""$PolicyDisplayName""" 2>$null
+$existingPolicy = $null
 
-if ($LASTEXITCODE -ne 0) {
-  throw "Failed to list existing monitoring policies."
+try {
+  $existingPolicy = & gcloud monitoring policies list `
+    --project $ProjectId `
+    --format="value(name)" `
+    --filter="displayName=\"$PolicyDisplayName\"" `
+    --quiet 2>$null
 }
+catch {
+  $existingPolicy = $null
+}
+
 
 if ($existingPolicy) {
   Write-Host "Existing policy found. Replacing: $existingPolicy"
   Invoke-GCloud @(
-    "alpha", "monitoring", "policies", "delete", $existingPolicy,
+    "monitoring", "policies", "delete", $existingPolicy,
     "--project", $ProjectId,
     "--quiet"
   )
 }
 
 Invoke-GCloud @(
-  "alpha", "monitoring", "policies", "create",
+  "monitoring", "policies", "create",
   "--project", $ProjectId,
   "--policy-from-file", $tmpPolicyFile
 )
